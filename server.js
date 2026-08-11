@@ -64,7 +64,7 @@ async function withCloudRequest(store, fn) {
   if(!store) throw Error('缺少 Netlify Blobs store');
   const remote=await store.get('store.json',{type:'json'});
   const data=remote&&typeof remote==='object' ? remote : seed();
-  let dirty=await hydrateCloudSidecars(store,data);
+  let dirty=false;
   if(normalizeStoreState(data)) dirty=true;
   const ctx={store,data,dirty,sidecars:[]};
   return CLOUD_CONTEXT.run(ctx, async () => {
@@ -111,28 +111,88 @@ async function listCloudJson(store, prefix) {
   }
   return out;
 }
+function applyCloudSessionSidecar(data, session) {
+  if(!session||!session.id) return false;
+  if(!Array.isArray(data.sessions)) data.sessions=[];
+  const existing=data.sessions.find(s=>s.id===session.id);
+  const before=JSON.stringify(existing||null);
+  if(existing) Object.assign(existing,mergeSession(existing,session));
+  else data.sessions.push(session);
+  const after=JSON.stringify(existing||session);
+  return before!==after;
+}
+function applyCloudAnswerSidecar(data, item) {
+  const sessionId=String(item?.sessionId||'');
+  const answer=item?.answer;
+  if(!sessionId||!answer||!answer.soundId) return false;
+  if(!Array.isArray(data.sessions)) data.sessions=[];
+  const session=data.sessions.find(s=>s.id===sessionId);
+  if(!session) return false;
+  const before=JSON.stringify(session.answers||[]);
+  session.answers=mergeAnswers(session.answers,[answer]);
+  return before!==JSON.stringify(session.answers||[]);
+}
+function markCloudDirty(changed) {
+  const ctx=activeCloudContext();
+  if(ctx&&changed) ctx.dirty=true;
+  return changed;
+}
 async function hydrateCloudSidecars(store, data) {
   let changed=false;
   if(!Array.isArray(data.sessions)) data.sessions=[];
   const sessions=await listCloudJson(store,'sessions/');
   for(const session of sessions) {
-    if(!session||!session.id) continue;
-    const existing=(data.sessions||[]).find(s=>s.id===session.id);
-    if(existing) Object.assign(existing,mergeSession(existing,session));
-    else data.sessions.push(session);
-    changed=true;
+    if(applyCloudSessionSidecar(data,session)) changed=true;
   }
   const answers=await listCloudJson(store,'answers/');
   for(const item of answers) {
-    const sessionId=String(item?.sessionId||'');
-    const answer=item?.answer;
-    if(!sessionId||!answer||!answer.soundId) continue;
-    const session=(data.sessions||[]).find(s=>s.id===sessionId);
-    if(!session) continue;
-    session.answers=mergeAnswers(session.answers,[answer]);
-    changed=true;
+    if(applyCloudAnswerSidecar(data,item)) changed=true;
   }
-  return changed;
+  if(changed) normalizeStoreState(data);
+  return markCloudDirty(changed);
+}
+async function hydrateCloudSessionSidecars(data, sessionId) {
+  const ctx=activeCloudContext();
+  const cleanSessionId=String(sessionId||'').trim();
+  if(!ctx||!cleanSessionId) return false;
+  let changed=false;
+  const session=await ctx.store.get(`sessions/${cleanSessionId}.json`,{type:'json'});
+  if(session&&typeof session==='object'&&applyCloudSessionSidecar(data,session)) changed=true;
+  const answers=await listCloudJson(ctx.store,`answers/${cleanSessionId}/`);
+  for(const item of answers) {
+    if(applyCloudAnswerSidecar(data,item)) changed=true;
+  }
+  if(changed) normalizeStoreState(data);
+  return markCloudDirty(changed);
+}
+async function hydrateCloudUserSidecars(data, userId, options={}) {
+  const ctx=activeCloudContext();
+  const cleanUserId=String(userId||'').trim();
+  if(!ctx||!cleanUserId) return false;
+  let changed=false;
+  let sessions=await listCloudJson(ctx.store,`user-sessions/${cleanUserId}/`);
+  if(!sessions.length&&options.fallbackAll!==false) {
+    sessions=(await listCloudJson(ctx.store,'sessions/')).filter(s=>s&&s.userId===cleanUserId);
+  }
+  for(const session of sessions) {
+    if(applyCloudSessionSidecar(data,session)) changed=true;
+  }
+  const sessionIds=new Set((data.sessions||[]).filter(s=>s&&s.userId===cleanUserId).map(s=>s.id));
+  const indexedAnswers=await listCloudJson(ctx.store,`user-answers/${cleanUserId}/`);
+  if(indexedAnswers.length) {
+    for(const item of indexedAnswers) {
+      if(applyCloudAnswerSidecar(data,item)) changed=true;
+    }
+  } else if(options.fallbackAll!==false) {
+    for(const sessionId of sessionIds) {
+      const answers=await listCloudJson(ctx.store,`answers/${sessionId}/`);
+      for(const item of answers) {
+        if(applyCloudAnswerSidecar(data,item)) changed=true;
+      }
+    }
+  }
+  if(changed) normalizeStoreState(data);
+  return markCloudDirty(changed);
 }
 function queueCloudSidecar(key, value) {
   const ctx=activeCloudContext();
@@ -143,14 +203,17 @@ function queueCloudSidecar(key, value) {
 function queueCloudSessionSidecar(session) {
   if(!isCloudRuntime()||!session?.id||isTestSession(session)) return;
   queueCloudSidecar(`sessions/${session.id}.json`,session);
+  if(session.userId) queueCloudSidecar(`user-sessions/${session.userId}/${session.id}.json`,session);
 }
 function queueCloudAnswerSidecar(session, answer) {
   if(!isCloudRuntime()||!session?.id||!answer?.soundId||isTestSession(session)) return;
-  queueCloudSidecar(`answers/${session.id}/${answer.soundId}.json`,{
+  const value={
     sessionId:session.id,
     userId:session.userId,
     answer
-  });
+  };
+  queueCloudSidecar(`answers/${session.id}/${answer.soundId}.json`,value);
+  if(session.userId) queueCloudSidecar(`user-answers/${session.userId}/${session.id}/${answer.soundId}.json`,value);
 }
 function seed() { return {
   sounds: [
@@ -2201,6 +2264,7 @@ function recordUnrecognizedAudioAnswer(data, session, sound, audioAnswer, transc
 }
 async function processAudioAnswerJob(sessionId, audioAnswerId, uploadedFile=null) {
   let data=readStore();
+  await hydrateCloudSessionSidecars(data,sessionId);
   let session=getSessionById(data,sessionId);
   if(!session) return {ok:false,error:'session_missing'};
   let audioAnswer=(session.audioAnswers||[]).find(a=>a.id===audioAnswerId);
@@ -2226,6 +2290,7 @@ async function processAudioAnswerJob(sessionId, audioAnswerId, uploadedFile=null
   }
 
   data=readStore();
+  await hydrateCloudSessionSidecars(data,sessionId);
   session=getSessionById(data,sessionId);
   if(!session) return {ok:false,error:'session_missing_after_transcribe'};
   audioAnswer=(session.audioAnswers||[]).find(a=>a.id===audioAnswerId);
@@ -2303,6 +2368,7 @@ function queueAudioAnswerTranscription(sessionId, audioAnswerId, uploadedFile=nu
 async function resolveSessionAudioAnswers(sessionId, maxWaitMs=8500) {
   const deadline=Date.now()+maxWaitMs;
   let data=readStore();
+  await hydrateCloudSessionSidecars(data,sessionId);
   let session=getSessionById(data,sessionId);
   if(!session) return {data,session:null,pendingCount:0};
   let pending=pendingAudioAnswers(session);
@@ -2313,6 +2379,7 @@ async function resolveSessionAudioAnswers(sessionId, maxWaitMs=8500) {
     if(jobs.length) await Promise.race([Promise.allSettled(jobs),sleep(waitMs)]);
     else await sleep(waitMs);
     data=readStore();
+    await hydrateCloudSessionSidecars(data,sessionId);
     session=getSessionById(data,sessionId);
     if(!session) return {data,session:null,pendingCount:0};
     pending=pendingAudioAnswers(session);
@@ -2335,6 +2402,9 @@ async function handleRequest(req,res) { try {
     return sendRateLimited(res,'录音上传太频繁，请稍后再试',1200);
   }
   const data=readStore();
+  if(isCloudRuntime()&&req.method==='GET'&&p.startsWith('/api/admin/')) {
+    await hydrateCloudSidecars(activeCloudContext().store,data);
+  }
   if(req.method==='GET'&&p==='/api/sounds') return send(res,200,data.sounds.map(publicSound));
   if(req.method==='GET'&&p==='/api/admin/sounds') return send(res,200,data.sounds.map(s=>adminSound(s,data.users)));
   if(req.method==='GET'&&p==='/api/admin/users') return send(res,200,data.users.filter(u=>!isTestUser(u)).map(u=>userPublic(u,data.sounds,data.sessions)).sort((a,b)=>new Date(b.lastSeen)-new Date(a.lastSeen)));
@@ -2368,6 +2438,7 @@ async function handleRequest(req,res) { try {
     }
     const u=resolveExistingRealUser(data,query);
     if(!u)return send(res,404,{error:'用户不存在',progress:{libraryTotal:data.sounds.filter(s=>s.enabled).length,libraryAnswered:0,libraryCompletion:0},rounds:[]});
+    await hydrateCloudUserSidecars(data,u.id);
     return send(res,200,userHistoryPublic(data,u));
   }
   if(req.method==='POST'&&p==='/api/users') {
@@ -2397,6 +2468,7 @@ async function handleRequest(req,res) { try {
     if(!enterRequestGuard(startGuardKey,2200,20000)) return sendRateLimited(res,'正在进入下一轮，请稍候',1600);
     try {
     const testMode=isTestUser(u)||startRequestTest;
+    if(!testMode) await hydrateCloudUserSidecars(data,u.id,{fallbackAll:false});
     const sessionList=sessionsFor(data,u);
     const pending=activeLibraryCompletionPending(u);
     if(pending&&sessionList.some(s=>s.id===pending.sessionId)) {
@@ -2424,10 +2496,11 @@ async function handleRequest(req,res) { try {
       leaveRequestGuard(startGuardKey,2200,20000);
     }
   }
-  if(req.method==='GET'&&p.startsWith('/api/game/monitor/')) { const sessionId=p.split('/').pop(); if(!takeRateLimit(requestKey(req,url,{sessionId},'monitor-poll'),{windowMs:3000,max:6,minIntervalMs:350})) return sendRateLimited(res,'监控刷新太频繁，请稍后再试',800); const s=getSessionById(data,sessionId);if(!s)return send(res,404,{error:'监控记录不存在'});return send(res,200,{sessionId:s.id,startedAt:s.startedAt,answeredCount:(s.answers||[]).length,total:s.soundIds.length,events:s.monitor||[]}); }
-  if(req.method==='POST'&&p==='/api/game/monitor-event') { const x=JSON.parse((await body(req)).toString()), session=getSessionById(data,x.sessionId); if(!session)return send(res,404,{error:'监控记录不存在'}); if(!takeRateLimit(requestKey(req,url,x,`monitor-event:${String(x.type||'').slice(0,60)}`),{windowMs:3000,max:8,minIntervalMs:180})) return send(res,200,{ok:true,skipped:true,reason:'rate_limited',testMode:isTestSession(session)}); const event=appendMonitor(session,'client',String(x.type||'client_event').slice(0,60),String(x.message||'客户端事件').slice(0,120),x.details||{}); if(!isTestSession(session)) writeStore(data); return send(res,200,{ok:true,event,testMode:isTestSession(session)}); }
+  if(req.method==='GET'&&p.startsWith('/api/game/monitor/')) { const sessionId=p.split('/').pop(); await hydrateCloudSessionSidecars(data,sessionId); if(!takeRateLimit(requestKey(req,url,{sessionId},'monitor-poll'),{windowMs:3000,max:6,minIntervalMs:350})) return sendRateLimited(res,'监控刷新太频繁，请稍后再试',800); const s=getSessionById(data,sessionId);if(!s)return send(res,404,{error:'监控记录不存在'});return send(res,200,{sessionId:s.id,startedAt:s.startedAt,answeredCount:(s.answers||[]).length,total:s.soundIds.length,events:s.monitor||[]}); }
+  if(req.method==='POST'&&p==='/api/game/monitor-event') { const x=JSON.parse((await body(req)).toString()); await hydrateCloudSessionSidecars(data,x.sessionId); const session=getSessionById(data,x.sessionId); if(!session)return send(res,404,{error:'监控记录不存在'}); if(!takeRateLimit(requestKey(req,url,x,`monitor-event:${String(x.type||'').slice(0,60)}`),{windowMs:3000,max:8,minIntervalMs:180})) return send(res,200,{ok:true,skipped:true,reason:'rate_limited',testMode:isTestSession(session)}); const event=appendMonitor(session,'client',String(x.type||'client_event').slice(0,60),String(x.message||'客户端事件').slice(0,120),x.details||{}); if(!isTestSession(session)) writeStore(data); return send(res,200,{ok:true,event,testMode:isTestSession(session)}); }
   if(req.method==='POST'&&p==='/api/game/audio-check') {
     const b=await body(req), {fields,files}=parseMultipart(b,req.headers['content-type']||'');
+    await hydrateCloudSessionSidecars(data,fields.sessionId);
     const session=getSessionById(data,fields.sessionId);
     if(!session)return send(res,404,{error:'监控记录不存在'});
     const testMode=isTestSession(session)||isTestRequest(req,url,fields);
@@ -2483,7 +2556,9 @@ async function handleRequest(req,res) { try {
     }
   }
   if(req.method==='POST'&&p==='/api/game/answer') {
-    const x=JSON.parse((await body(req)).toString()), session=getSessionById(data,x.sessionId), u=session&&getUserById(data,session.userId), sound=session&&data.sounds.find(s=>s.id===x.soundId);
+    const x=JSON.parse((await body(req)).toString());
+    await hydrateCloudSessionSidecars(data,x.sessionId);
+    const session=getSessionById(data,x.sessionId), u=session&&getUserById(data,session.userId), sound=session&&data.sounds.find(s=>s.id===x.soundId);
     if(!session||!u||!sound)return send(res,404,{error:'题目不存在'});
     const answerGuardKey=requestKey(req,url,x,'answer-submit');
     if(!enterRequestGuard(answerGuardKey,3000,20000)) return sendRateLimited(res,'本题判断正在提交，请稍候',1600);
@@ -2537,6 +2612,7 @@ async function handleRequest(req,res) { try {
   }
   if(req.method==='POST'&&p==='/api/game/complete-shown') {
     const x=JSON.parse((await body(req)).toString());
+    await hydrateCloudSessionSidecars(data,x.sessionId);
     const session=getSessionById(data,x.sessionId);
     const u=(session&&getUserById(data,session.userId))||getUserById(data,x.userId);
     if(!u)return send(res,404,{error:'用户不存在'});

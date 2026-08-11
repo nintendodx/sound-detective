@@ -1,6 +1,6 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const APP_VERSION = '0.1066-20260811';
+const APP_VERSION = '0.1067-20260811';
 const TEST_MODE = (() => {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -14,6 +14,14 @@ const DEVICE_COOKIE_NAME = 'voiceDetectiveDeviceId';
 const USER_COOKIE_NAME = 'voiceDetectiveUserId';
 const NAME_COOKIE_NAME = 'voiceDetectiveName';
 const CHANGELOG = [
+  {
+    version: '0.1067-20260811',
+    items: [
+      '修复云端语音识别成功后重复提交导致停在当前题的问题。',
+      '已作答的语音上传会自动进入下一题，不再误提示没有收到声音。',
+      '首题播放改为明确点击播放，降低 iPhone 浏览器自动播放拦截影响。'
+    ]
+  },
   {
     version: '0.1066-20260811',
     items: [
@@ -1209,6 +1217,11 @@ function isMissingStateError(e) {
   return /用户不存在|题目不存在|记录不存在|监控记录不存在/.test(message);
 }
 
+function isDuplicateAnswerError(e) {
+  const message = e && e.message ? e.message : String(e || '');
+  return /本题已作答/.test(message);
+}
+
 function recoverStaleGameState(message = '本轮状态已失效，请重新开始') {
   clearSoundCache();
   clearRecordStopTimer();
@@ -1349,7 +1362,11 @@ function renderQuestion() {
   trackAnalytics('question_rendered', { index: current, total, soundId: q.id });
   preloadUpcomingSounds(index);
   clearTimeout(questionPlayTimer);
-  questionPlayTimer = setTimeout(() => play(q, { auto: true }), current === 1 ? 60 : 120);
+  if (current === 1) {
+    addClientEvent('audio_first_question_waiting_for_tap', '首题等待用户点击播放声音', { soundId: q.id }, true);
+  } else {
+    questionPlayTimer = setTimeout(() => play(q, { auto: true }), 120);
+  }
 }
 
 function soundUrl(q) {
@@ -1387,6 +1404,12 @@ function setPlaybackNotice(text, tone = 'normal') {
   if (stageText) stageText.textContent = message;
 }
 
+function setReplayButtonLabel(mode = 'replay') {
+  const replay = $('#replay');
+  if (!replay) return;
+  replay.textContent = mode === 'play' ? '▶ 播放声音' : '↻ 再听一次';
+}
+
 function showQuestionCue(current, total) {
   const cue = $('#questionCue');
   const cueText = $('#questionCueText');
@@ -1400,14 +1423,15 @@ function showQuestionCue(current, total) {
     cue.classList.add('cue-pop');
   }
   if (stageBadge) stageBadge.textContent = `第 ${current} 题`;
-  setPlaybackNotice(current === 1 ? '声音线索将自动播放' : '新的声音线索正在加载', 'loading');
+  setPlaybackNotice(current === 1 ? '点击播放声音线索' : '新的声音线索正在加载', 'loading');
+  setReplayButtonLabel(current === 1 ? 'play' : 'replay');
   if (stage) {
     stage.classList.remove('stage-shift', 'audio-playing', 'audio-loading', 'audio-needs-action');
     void stage.offsetWidth;
     stage.classList.add('stage-shift');
   }
   const replay = $('#replay');
-  if (replay) replay.classList.remove('attention');
+  if (replay) replay.classList.toggle('attention', current === 1);
   if (current > 1 && navigator.vibrate) {
     try { navigator.vibrate(28); } catch (e) {}
   }
@@ -1424,6 +1448,7 @@ function markPlaybackNeedsAction(q, token, auto) {
   if (stage) stage.classList.remove('audio-loading', 'audio-playing');
   if (stage) stage.classList.add('audio-needs-action');
   setPlaybackNotice('没有确认声音已播放，请点再听一次', 'warning');
+  setReplayButtonLabel('play');
   if (replay) replay.classList.add('attention');
   addClientEvent('audio_play_unconfirmed', '浏览器没有确认题目声音开始播放', { soundId: q.id, auto: Boolean(auto), waitMs: Date.now() - audioPlayPendingAt }, true);
   trackAnalytics('audio_play_unconfirmed', { soundId: q.id, auto: Boolean(auto), waitMs: Date.now() - audioPlayPendingAt });
@@ -1486,6 +1511,7 @@ function markPlaybackConfirmed(q, token, currentAudio) {
   const replay = $('#replay');
   if (stage) stage.classList.remove('audio-loading', 'audio-needs-action');
   if (stage) stage.classList.add('audio-playing');
+  setReplayButtonLabel('replay');
   if (replay) replay.classList.remove('attention');
   setPlaybackNotice('请仔细听，判断它来自什么物品或场景', 'playing');
   addClientEvent('audio_playing', '题目声音已开始播放', { soundId: q.id, sinkId: currentAudio.sinkId || 'system-default' }, true);
@@ -1549,6 +1575,7 @@ function play(q = game.questions[index], options = {}) {
         audioPlayPendingAt = 0;
         if (stage) stage.classList.remove('audio-loading', 'audio-playing');
         if (stage) stage.classList.add('audio-needs-action');
+        setReplayButtonLabel('play');
         if (replay) replay.classList.add('attention');
         setPlaybackNotice('自动播放被浏览器拦截，请点再听一次', 'warning');
         addClientEvent('audio_play_failed', '题目声音播放失败', { soundId: q.id, error: e.message || String(e), auto: Boolean(options.auto) }, true);
@@ -1606,6 +1633,12 @@ async function submit(answer, inputMode = 'text', soundIdOverride = '') {
     if (isMissingStateError(e)) {
       addClientEvent('stale_game_state', '本轮答题状态已失效，等待用户重新开始', { error: e.message }, false);
       recoverStaleGameState('本轮已失效，请重新开始挑战');
+      return;
+    }
+    if (isDuplicateAnswerError(e)) {
+      addClientEvent('answer_duplicate_recorded', '后端提示本题已记录，准备进入下一题', { soundId, inputMode }, true);
+      trackAnalytics('answer_response', { soundId, recorded: true, inputMode, duplicate: true, durationMs: Date.now() - roundStartedAt });
+      await goNext();
       return;
     }
     toast(e.message);
@@ -2088,7 +2121,24 @@ async function uploadAudioProbe() {
     try {
       const r = await fetch('/api/game/audio-check', { method: 'POST', body: fd });
       const x = await r.json();
-      if (!r.ok) throw Error(x.error || '音频诊断上报失败');
+      if (!r.ok) {
+        if (r.status === 409 && /本题已作答/.test(x.error || '')) {
+          addClientEvent('audio_probe_duplicate_answer', '后端提示本题已记录，准备进入下一题', {
+            soundId: audioProbeSoundId,
+            status: r.status
+          }, true);
+          finishAudioProbe({
+            ok: true,
+            duplicateAnswered: true,
+            accepted: true,
+            pending: false,
+            soundId: audioProbeSoundId,
+            error: x.error || ''
+          });
+          return;
+        }
+        throw Error(x.error || '音频诊断上报失败');
+      }
       addClientEvent('audio_probe_uploaded', x.pending ? '后端返回：已排队后台识别' : (x.transcript ? '后端返回：已识别出文字' : '后端返回：已收到诊断音频'), {
         status: r.status,
         bytes: x.bytes,
@@ -2178,6 +2228,31 @@ async function startAudioOnlyRecording() {
   }
 }
 
+function advanceAfterRecordedAudioAnswer(result, currentSoundId, eventType = 'audio_only_answer_recorded') {
+  const soundId = result?.soundId || currentSoundId;
+  playFeedbackTone('end');
+  preloadSound(game?.questions?.[index + 1]);
+  addClientEvent(eventType, '语音答案已由后端记录，准备进入下一题', {
+    soundId,
+    transcript: result?.transcript || '',
+    durationMs: result?.durationMs || 0,
+    audioAnswerId: result?.audioAnswerId || '',
+    transcriptionStatus: result?.transcriptionStatus || '',
+    transcriptionProvider: result?.transcriptionProvider || '',
+    asrDurationMs: result?.asrDurationMs || 0
+  }, true);
+  trackAnalytics('answer_response', {
+    soundId,
+    recorded: true,
+    inputMode: 'voice',
+    via: 'audio-check',
+    durationMs: Date.now() - roundStartedAt
+  });
+  goNext().catch(e => {
+    toast(e.message || '进入下一题失败，请再试一次');
+  });
+}
+
 function finishAudioOnlyCapture(result) {
   resetRecordButton();
   if (result && result.stale) {
@@ -2190,7 +2265,9 @@ function finishAudioOnlyCapture(result) {
     addClientEvent('audio_only_stale_ignored', '忽略过期的录音识别结果', { resultSoundId: result.soundId, currentSoundId }, true);
     return;
   }
-  if (result && result.ok && result.audioUsable === false) {
+  if (result && result.ok && result.duplicateAnswered) {
+    advanceAfterRecordedAudioAnswer(result, currentSoundId, 'audio_only_duplicate_recorded');
+  } else if (result && result.ok && result.audioUsable === false) {
     playFeedbackTone('fail');
     const message = result.audioStatus === 'no_speech'
       ? '没有录到清楚的声音，请再试一次'
@@ -2223,9 +2300,8 @@ function finishAudioOnlyCapture(result) {
       toast(e.message || '进入下一题失败，请再试一次');
     });
   } else if (result && result.ok && result.transcript) {
-    playFeedbackTone('end');
-    addClientEvent('audio_only_transcribed', '录音已转成文字，准备提交判断', { transcript: result.transcript, durationMs: result.durationMs }, true);
-    submit(result.transcript, 'media_recorder', result.soundId || currentSoundId);
+    addClientEvent('audio_only_transcribed', '录音已转成文字，后端已完成记录', { transcript: result.transcript, durationMs: result.durationMs }, true);
+    advanceAfterRecordedAudioAnswer(result, currentSoundId);
   } else if (result && result.ok) {
     playFeedbackTone('fail');
     suggestTextAnswer(result.transcriptionReason || '没识别到文字，请再试一次');
