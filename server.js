@@ -1194,6 +1194,73 @@ function roundHistoryForUser(userId, sessions=[]) {
     })
     .sort((a,b)=>new Date(b.completedAt||b.startedAt||0)-new Date(a.completedAt||a.startedAt||0));
 }
+function answerStatusLabel(answer) {
+  if(!answer) return '未答';
+  if(answer.recognized===false) return '未识别';
+  if(answer.transcriptionStatus&&answer.transcriptionStatus!=='ok') return '识别失败';
+  return answer.correct ? '答对' : '答错';
+}
+function adminAnswerRecord(soundId, sound, answer, index) {
+  return {
+    index,
+    soundId,
+    soundName:sound?.name||'未知题目',
+    originalName:sound?.originalName||'',
+    tags:Array.isArray(sound?.tags)?sound.tags.slice(0,6):[],
+    answer:answer?.answer||'',
+    correct:Boolean(answer?.correct),
+    answered:Boolean(answer),
+    answeredAt:answer?.at||'',
+    inputMode:answer?.recovered ? 'recovered' : (answer?.inputMode||''),
+    recognized:answer ? answer.recognized!==false : false,
+    transcriptionStatus:answer?.transcriptionStatus||'',
+    transcriptionReason:answer?.transcriptionReason||'',
+    statusLabel:answerStatusLabel(answer)
+  };
+}
+function adminUserAnswerHistory(data, u) {
+  const sessionList=sessionsFor(data,u)
+    .filter(s=>s&&s.userId===u.id&&!isTestSession(s)&&Array.isArray(s.soundIds)&&s.soundIds.length)
+    .sort((a,b)=>new Date(a.startedAt||0)-new Date(b.startedAt||0));
+  const soundsById=new Map((data.sounds||[]).map(s=>[s.id,s]));
+  const rounds=sessionList.map((session,roundIndex)=>{
+    const answers=Array.isArray(session.answers)?session.answers:[];
+    const answersBySound=new Map(answers.filter(a=>a&&a.soundId).map(a=>[a.soundId,a]));
+    const soundIds=session.soundIds||[];
+    const records=soundIds.map((soundId,index)=>{
+      const sound=soundsById.get(soundId);
+      const answer=answersBySound.get(soundId)||null;
+      return adminAnswerRecord(soundId,sound,answer,index+1);
+    });
+    const listedSoundIds=new Set(soundIds);
+    const extraAnswers=answers
+      .filter(answer=>answer?.soundId&&!listedSoundIds.has(answer.soundId))
+      .sort((a,b)=>new Date(a.at||0)-new Date(b.at||0));
+    for(const answer of extraAnswers) {
+      records.push(adminAnswerRecord(answer.soundId,soundsById.get(answer.soundId),answer,records.length+1));
+    }
+    const answered=records.filter(r=>r.answered).length;
+    const correct=records.filter(r=>r.correct).length;
+    const total=records.length;
+    return {
+      sessionId:session.id,
+      roundIndex:roundIndex+1,
+      playthrough:sessionPlaythrough(session),
+      startedAt:session.startedAt||'',
+      completedAt:sessionCompletedAt(session),
+      total,
+      answered,
+      correct,
+      accuracy:answered ? Math.round(correct/answered*100) : 0,
+      records
+    };
+  });
+  return {
+    user:userPublic(u,data.sounds,sessionList),
+    generatedAt:new Date().toISOString(),
+    rounds
+  };
+}
 function userHistoryPublic(data, u) {
   const sessionList=sessionsFor(data,u);
   const progress=libraryProgress(u,data.sounds,sessionList,currentPlaythrough(u));
@@ -2408,6 +2475,14 @@ async function handleRequest(req,res) { try {
   if(req.method==='GET'&&p==='/api/sounds') return send(res,200,data.sounds.map(publicSound));
   if(req.method==='GET'&&p==='/api/admin/sounds') return send(res,200,data.sounds.map(s=>adminSound(s,data.users)));
   if(req.method==='GET'&&p==='/api/admin/users') return send(res,200,data.users.filter(u=>!isTestUser(u)).map(u=>userPublic(u,data.sounds,data.sessions)).sort((a,b)=>new Date(b.lastSeen)-new Date(a.lastSeen)));
+  const adminUserAnswersMatch=p.match(/^\/api\/admin\/users\/([^/]+)\/answers$/);
+  if(req.method==='GET'&&adminUserAnswersMatch) {
+    const userId=decodeURIComponent(adminUserAnswersMatch[1]);
+    const u=data.users.find(user=>!isTestUser(user)&&user.id===userId);
+    if(!u) return send(res,404,{error:'用户不存在'});
+    if(isCloudRuntime()) await hydrateCloudUserSidecars(data,u.id);
+    return send(res,200,adminUserAnswerHistory(data,u));
+  }
   if(req.method==='GET'&&p==='/api/admin/analytics') return send(res,200,analyticsSummary(data));
   if(req.method==='POST'&&p==='/api/analytics/event') {
     const raw=(await body(req)).toString();

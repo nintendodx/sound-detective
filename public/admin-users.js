@@ -1,4 +1,5 @@
 const $ = s => document.querySelector(s);
+let usersById = new Map();
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({
   '&': '&amp;',
@@ -20,10 +21,126 @@ function accuracyCell(user) {
   return `<b>${accuracy}%</b><small>累计答对 ${correct} / ${total} 题</small>`;
 }
 
+function inputModeLabel(mode) {
+  return {
+    text: '文字',
+    voice: '语音',
+    speech: '语音',
+    recovered: '恢复记录'
+  }[String(mode || '').toLowerCase()] || '未知方式';
+}
+
+function statusClass(record) {
+  if (!record.answered) return 'missing';
+  return record.correct ? 'ok' : 'bad';
+}
+
+function answerText(record) {
+  const text = String(record.answer || '').trim();
+  if (text) return text;
+  if (!record.answered) return '未作答';
+  if (record.recognized === false || (record.transcriptionStatus && record.transcriptionStatus !== 'ok')) return '未识别到文字';
+  return '空白回答';
+}
+
+function roundTime(round) {
+  const started = date(round.startedAt);
+  const completed = date(round.completedAt);
+  if (started === completed || completed === '-') return started;
+  return `${started} - ${completed}`;
+}
+
+function answerMeta(record) {
+  const parts = [];
+  if (record.answeredAt) parts.push(date(record.answeredAt));
+  if (record.inputMode) parts.push(inputModeLabel(record.inputMode));
+  if (record.transcriptionReason) parts.push(record.transcriptionReason);
+  return parts.join(' · ') || '-';
+}
+
+function renderAnswerRecord(record) {
+  return `
+    <div class="answer-record-row ${statusClass(record)}">
+      <div class="answer-index">${Number(record.index || 0)}</div>
+      <div class="answer-record-main">
+        <div class="answer-record-head">
+          <b>正确答案：${esc(record.soundName)}</b>
+          <span class="answer-status ${statusClass(record)}">${esc(record.statusLabel)}</span>
+        </div>
+        <div class="answer-pair">
+          <span>用户回答</span>
+          <strong>${esc(answerText(record))}</strong>
+        </div>
+        <small>${esc(answerMeta(record))}</small>
+      </div>
+    </div>
+  `;
+}
+
+function renderRound(round) {
+  return `
+    <section class="round-section">
+      <div class="round-head">
+        <div>
+          <h3>第 ${Number(round.roundIndex || 0)} 轮</h3>
+          <small>${esc(roundTime(round))}</small>
+        </div>
+        <div class="round-score">
+          <b>${Number(round.correct || 0)} / ${Number(round.total || 0)}</b>
+          <span>答对 ${Number(round.correct || 0)} 题，已答 ${Number(round.answered || 0)} 题</span>
+        </div>
+      </div>
+      <div class="answer-record-list">
+        ${(round.records || []).map(renderAnswerRecord).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderAnswerHistory(payload) {
+  const rounds = Array.isArray(payload.rounds) ? payload.rounds : [];
+  const totalAnswers = rounds.reduce((sum, r) => sum + Number(r.answered || 0), 0);
+  const totalCorrect = rounds.reduce((sum, r) => sum + Number(r.correct || 0), 0);
+  $('#answerDialogTitle').textContent = `${payload.user?.name || '用户'} 的回答记录`;
+  $('#answerDialogMeta').textContent = `共 ${rounds.length} 轮，${totalCorrect} / ${totalAnswers} 题答对`;
+  $('#answerDialogBody').innerHTML = rounds.length
+    ? rounds.map(renderRound).join('')
+    : '<div class="history-empty answer-empty">这个用户还没有答题记录</div>';
+}
+
+function openDialog(dialog) {
+  if (typeof dialog.showModal === 'function') dialog.showModal();
+  else dialog.setAttribute('open', '');
+}
+
+function closeDialog(dialog) {
+  if (typeof dialog.close === 'function') dialog.close();
+  else dialog.removeAttribute('open');
+}
+
+async function openUserAnswers(userId) {
+  const dialog = $('#answerDialog');
+  const user = usersById.get(userId);
+  $('#answerDialogTitle').textContent = `${user?.name || '用户'} 的回答记录`;
+  $('#answerDialogMeta').textContent = '正在加载';
+  $('#answerDialogBody').innerHTML = '<div class="history-empty answer-empty">正在加载回答记录...</div>';
+  if (!dialog.open) openDialog(dialog);
+  try {
+    const r = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/answers?t=${Date.now()}`, { cache: 'no-store' });
+    const payload = await r.json();
+    if (!r.ok) throw new Error(payload.error || '加载失败');
+    renderAnswerHistory(payload);
+  } catch (e) {
+    $('#answerDialogMeta').textContent = '加载失败';
+    $('#answerDialogBody').innerHTML = `<div class="history-empty answer-empty">加载失败：${esc(e.message)}</div>`;
+  }
+}
+
 async function loadUsers() {
-  const r = await fetch('/api/admin/users');
+  const r = await fetch(`/api/admin/users?t=${Date.now()}`, { cache: 'no-store' });
   const users = await r.json();
   if (!r.ok) throw new Error(users.error || '加载失败');
+  usersById = new Map(users.map(u => [u.id, u]));
   $('#userRows').innerHTML = users.map(u => `
     <tr>
       <td><b>${esc(u.name)}</b></td>
@@ -31,10 +148,22 @@ async function loadUsers() {
       <td>${date(u.lastSeen)}</td>
       <td>${Number(u.total || 0)} 题</td>
       <td>${accuracyCell(u)}</td>
+      <td><button class="history-open user-answer-open" type="button" data-user-id="${esc(u.id)}">回答记录</button></td>
     </tr>
-  `).join('') || '<tr><td colspan="5">尚无用户数据</td></tr>';
+  `).join('') || '<tr><td colspan="6">尚无用户数据</td></tr>';
 }
 
+$('#userRows').addEventListener('click', e => {
+  const button = e.target.closest('.user-answer-open');
+  if (!button) return;
+  openUserAnswers(button.dataset.userId);
+});
+
+$('#answerDialogClose').addEventListener('click', () => closeDialog($('#answerDialog')));
+$('#answerDialog').addEventListener('click', e => {
+  if (e.target === $('#answerDialog')) closeDialog($('#answerDialog'));
+});
+
 loadUsers().catch(e => {
-  $('#userRows').innerHTML = `<tr><td colspan="5">加载失败：${esc(e.message)}</td></tr>`;
+  $('#userRows').innerHTML = `<tr><td colspan="6">加载失败：${esc(e.message)}</td></tr>`;
 });

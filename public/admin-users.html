@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>用户管理 · 声音侦探</title>
-  <link rel="stylesheet" href="/public/admin.css?v=0.1050-20260807">
+  <link rel="stylesheet" href="/public/admin.css?v=0.1071-20260811">
 </head>
 <body>
   <aside>
@@ -31,12 +31,25 @@
             <th>最后访问</th>
             <th>累计答题</th>
             <th>历史整体正确率</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody id="userRows"></tbody>
       </table>
     </section>
   </main>
-  <script src="/public/admin-users.js?v=0.1050-20260807"></script>
+  <dialog id="answerDialog" class="history-dialog user-answer-dialog">
+    <div class="dialog-panel">
+      <div class="dialog-head">
+        <div>
+          <small id="answerDialogMeta">答题记录</small>
+          <h2 id="answerDialogTitle">用户答题记录</h2>
+        </div>
+        <button class="secondary" id="answerDialogClose" type="button">关闭</button>
+      </div>
+      <div id="answerDialogBody" class="user-answer-body"></div>
+    </div>
+  </dialog>
+  <script src="/public/admin-users.js?v=0.1071-20260811"></script>
 </body>
 </html>
