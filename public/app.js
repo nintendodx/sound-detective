@@ -1,6 +1,6 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const APP_VERSION = '0.1069-20260811';
+const APP_VERSION = '0.1070-20260811';
 const TEST_MODE = (() => {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -14,6 +14,14 @@ const DEVICE_COOKIE_NAME = 'voiceDetectiveDeviceId';
 const USER_COOKIE_NAME = 'voiceDetectiveUserId';
 const NAME_COOKIE_NAME = 'voiceDetectiveName';
 const CHANGELOG = [
+  {
+    version: '0.1070-20260811',
+    items: [
+      '首题恢复自动尝试播放，和后续题目保持一致。',
+      '录音按钮只负责语音作答，不再在未播放时替代播放按钮。',
+      '顶部播放状态不再写成可点击按钮，避免出现两个播放入口。'
+    ]
+  },
   {
     version: '0.1069-20260811',
     items: [
@@ -1399,11 +1407,7 @@ function renderQuestion() {
   trackAnalytics('question_rendered', { index: current, total, soundId: q.id });
   preloadUpcomingSounds(index);
   clearTimeout(questionPlayTimer);
-  if (current === 1) {
-    addClientEvent('audio_first_question_waiting_for_tap', '首题等待用户点击播放声音', { soundId: q.id }, true);
-  } else {
-    questionPlayTimer = setTimeout(() => play(q, { auto: true }), 120);
-  }
+  questionPlayTimer = setTimeout(() => play(q, { auto: true }), current === 1 ? 160 : 120);
 }
 
 function soundUrl(q) {
@@ -1460,15 +1464,15 @@ function showQuestionCue(current, total) {
     cue.classList.add('cue-pop');
   }
   if (stageBadge) stageBadge.textContent = `第 ${current} 题`;
-  setPlaybackNotice(current === 1 ? '点击播放声音线索' : '新的声音线索正在加载', 'loading');
-  setReplayButtonLabel(current === 1 ? 'play' : 'replay');
+  setPlaybackNotice(current === 1 ? '声音线索正在准备' : '新的声音线索正在加载', 'loading');
+  setReplayButtonLabel('replay');
   if (stage) {
     stage.classList.remove('stage-shift', 'audio-playing', 'audio-loading', 'audio-needs-action');
     void stage.offsetWidth;
     stage.classList.add('stage-shift');
   }
   const replay = $('#replay');
-  if (replay) replay.classList.toggle('attention', current === 1);
+  if (replay) replay.classList.remove('attention');
   if (current > 1 && navigator.vibrate) {
     try { navigator.vibrate(28); } catch (e) {}
   }
@@ -1737,9 +1741,12 @@ function startRecordInteraction(e) {
   const q = game?.questions?.[index];
   if (!q) return recoverStaleGameState('本轮已失效，请重新开始挑战');
   if (q && confirmedPlaybackKey !== playbackKey(q)) {
-    addClientEvent('record_blocked_audio_unconfirmed', '未确认听到题目声音，先播放声音', { soundId: q.id }, true);
+    addClientEvent('record_blocked_audio_unconfirmed', '未确认听到题目声音，提示用户使用播放按钮', { soundId: q.id }, true);
     trackAnalytics('record_blocked_audio_unconfirmed', { soundId: q.id });
-    play(q, { manual: true, force: true });
+    setPlaybackNotice('先点再听一次播放声音，听完再作答', 'warning');
+    setReplayButtonLabel('play');
+    const replay = $('#replay');
+    if (replay) replay.classList.add('attention');
     toast('先听这题声音，听完再录音');
     return;
   }
