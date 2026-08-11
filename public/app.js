@@ -1,6 +1,6 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const APP_VERSION = '0.1068-20260811';
+const APP_VERSION = '0.1069-20260811';
 const TEST_MODE = (() => {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -14,6 +14,13 @@ const DEVICE_COOKIE_NAME = 'voiceDetectiveDeviceId';
 const USER_COOKIE_NAME = 'voiceDetectiveUserId';
 const NAME_COOKIE_NAME = 'voiceDetectiveName';
 const CHANGELOG = [
+  {
+    version: '0.1069-20260811',
+    items: [
+      '答题区改为完全非浮层布局，修复 Safari/微信内打开时提示卡片被底部操作区遮挡。',
+      '收紧移动端声音卡片高度，文字输入展开后仍保留清晰的上下间距。'
+    ]
+  },
   {
     version: '0.1068-20260811',
     items: [

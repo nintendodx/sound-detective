@@ -277,9 +277,10 @@ button:disabled {
   padding: 18px 0 24px;
 }
 .sound-stage {
-  flex: 1;
+  flex: 1 1 auto;
   width: 100%;
-  min-height: clamp(260px, 44svh, 460px);
+  min-height: clamp(220px, 34svh, 400px);
+  max-height: 430px;
   margin: 0 auto;
   border: 1px solid #e7edf7;
   border-radius: 18px;
@@ -449,9 +450,7 @@ button:disabled {
   50% { transform: translateY(-2px); }
 }
 .answer-area {
-  position: -webkit-sticky;
-  position: sticky;
-  bottom: 0;
+  position: relative;
   z-index: 6;
   flex-shrink: 0;
   width: 100vw;
@@ -461,6 +460,7 @@ button:disabled {
   padding-bottom: max(18px, calc(12px + env(safe-area-inset-bottom)));
   background: #fffdf9;
   border-top: 1px solid #f0e8df;
+  box-shadow: 0 -10px 22px #17203308;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
@@ -851,10 +851,11 @@ button:disabled {
     border-radius: 0;
   }
   .sound-stage {
-    min-height: clamp(240px, 42svh, 420px);
+    min-height: clamp(190px, 31svh, 340px);
+    max-height: 360px;
   }
   .quiz-focus {
-    min-height: 320px;
+    min-height: 0;
   }
 }
 
@@ -873,7 +874,8 @@ button:disabled {
   .input,
   .primary { padding: 12px; }
   .sound-stage {
-    min-height: clamp(220px, 40svh, 380px);
+    min-height: clamp(170px, 29svh, 310px);
+    max-height: 330px;
   }
   .summary-page h1 { font-size: 32px; }
   .result-art { min-height: 226px; }
@@ -951,7 +953,8 @@ button:disabled {
     padding: 10px 0 16px;
   }
   .sound-stage {
-    min-height: clamp(210px, 38svh, 340px);
+    min-height: clamp(160px, 27svh, 300px);
+    max-height: 315px;
     gap: 9px;
   }
   .sound-wave {
@@ -1004,7 +1007,8 @@ button:disabled {
     border-radius: 10px;
   }
   .sound-stage {
-    min-height: clamp(180px, 34svh, 300px);
+    min-height: clamp(140px, 24svh, 250px);
+    max-height: 270px;
   }
   .sound-badge {
     min-width: 108px;
