@@ -64,8 +64,9 @@ async function withCloudRequest(store, fn) {
   if(!store) throw Error('缺少 Netlify Blobs store');
   const remote=await store.get('store.json',{type:'json'});
   const data=remote&&typeof remote==='object' ? remote : seed();
-  normalizeStoreState(data);
-  const ctx={store,data,dirty:false};
+  let dirty=await hydrateCloudSidecars(store,data);
+  if(normalizeStoreState(data)) dirty=true;
+  const ctx={store,data,dirty,sidecars:[]};
   return CLOUD_CONTEXT.run(ctx, async () => {
     const result=await fn();
     await flushCloudStore();
@@ -74,13 +75,82 @@ async function withCloudRequest(store, fn) {
 }
 async function flushCloudStore() {
   const ctx=activeCloudContext();
-  if(!ctx||!ctx.dirty) return;
-  const latest=await ctx.store.get('store.json',{type:'json'});
-  const next=latest&&typeof latest==='object' ? mergeStoreData(latest,ctx.data) : ctx.data;
-  normalizeStoreState(next);
+  if(!ctx||(!ctx.dirty&&!(ctx.sidecars||[]).length)) return;
+  for(const item of ctx.sidecars||[]) {
+    await ctx.store.setJSON(item.key,item.value);
+  }
+  ctx.sidecars=[];
+  if(!ctx.dirty) return;
+  let next=ctx.data;
+  for(let attempt=0; attempt<4; attempt++) {
+    const latest=await ctx.store.get('store.json',{type:'json'});
+    next=latest&&typeof latest==='object' ? mergeStoreData(latest,next) : next;
+    normalizeStoreState(next);
+    await ctx.store.setJSON('store.json',next);
+    await sleep(120+Math.floor(Math.random()*120));
+    const persisted=await ctx.store.get('store.json',{type:'json'});
+    const verified=persisted&&typeof persisted==='object' ? mergeStoreData(persisted,next) : next;
+    normalizeStoreState(verified);
+    if(JSON.stringify(persisted||{})===JSON.stringify(verified)) {
+      next=verified;
+      break;
+    }
+    next=verified;
+    await sleep(80*(attempt+1));
+  }
   await ctx.store.setJSON('store.json',next);
   ctx.data=next;
   ctx.dirty=false;
+}
+async function listCloudJson(store, prefix) {
+  const { blobs } = await store.list({ prefix });
+  const out=[];
+  for(const item of blobs||[]) {
+    const value=await store.get(item.key,{type:'json'});
+    if(value&&typeof value==='object') out.push(value);
+  }
+  return out;
+}
+async function hydrateCloudSidecars(store, data) {
+  let changed=false;
+  if(!Array.isArray(data.sessions)) data.sessions=[];
+  const sessions=await listCloudJson(store,'sessions/');
+  for(const session of sessions) {
+    if(!session||!session.id) continue;
+    const existing=(data.sessions||[]).find(s=>s.id===session.id);
+    if(existing) Object.assign(existing,mergeSession(existing,session));
+    else data.sessions.push(session);
+    changed=true;
+  }
+  const answers=await listCloudJson(store,'answers/');
+  for(const item of answers) {
+    const sessionId=String(item?.sessionId||'');
+    const answer=item?.answer;
+    if(!sessionId||!answer||!answer.soundId) continue;
+    const session=(data.sessions||[]).find(s=>s.id===sessionId);
+    if(!session) continue;
+    session.answers=mergeAnswers(session.answers,[answer]);
+    changed=true;
+  }
+  return changed;
+}
+function queueCloudSidecar(key, value) {
+  const ctx=activeCloudContext();
+  if(!ctx) return;
+  ctx.sidecars=Array.isArray(ctx.sidecars)?ctx.sidecars:[];
+  ctx.sidecars.push({key,value});
+}
+function queueCloudSessionSidecar(session) {
+  if(!isCloudRuntime()||!session?.id||isTestSession(session)) return;
+  queueCloudSidecar(`sessions/${session.id}.json`,session);
+}
+function queueCloudAnswerSidecar(session, answer) {
+  if(!isCloudRuntime()||!session?.id||!answer?.soundId||isTestSession(session)) return;
+  queueCloudSidecar(`answers/${session.id}/${answer.soundId}.json`,{
+    sessionId:session.id,
+    userId:session.userId,
+    answer
+  });
 }
 function seed() { return {
   sounds: [
@@ -427,6 +497,68 @@ function normalizeAnswerHistory(data) {
   }
   return changed;
 }
+function recoverAnswersFromMonitor(data, session) {
+  if(!session||!Array.isArray(session.monitor)||!Array.isArray(session.soundIds)) return false;
+  session.answers=Array.isArray(session.answers)?session.answers:[];
+  const answered=new Set(session.answers.map(a=>a&&a.soundId).filter(Boolean));
+  const usedRecoveryEvents=new Set(session.answers.map(a=>a&&a.recoveredFromEventId).filter(Boolean));
+  const soundsById=new Map((data.sounds||[]).map(s=>[s.id,s]));
+  const validSoundIds=new Set(session.soundIds||[]);
+  const events=[...session.monitor].sort((a,b)=>new Date(a.at||0)-new Date(b.at||0));
+  let currentSoundId='';
+  let lastSubmission=null;
+  let changed=false;
+  const nextUnansweredAfter = soundId => {
+    const list=session.soundIds||[];
+    const start=Math.max(0,list.indexOf(soundId));
+    for(let offset=1; offset<=list.length; offset++) {
+      const candidate=list[(start+offset)%list.length];
+      if(candidate&&!answered.has(candidate)) return candidate;
+    }
+    return '';
+  };
+  const recover=(soundId, answer, event, inputMode='text') => {
+    const eventKey=String(event?.id||[event?.at||'',event?.type||'',event?.details?.answer||''].join('|'));
+    if(eventKey&&usedRecoveryEvents.has(eventKey)) return false;
+    let cleanSoundId=String(soundId||'');
+    if(cleanSoundId&&answered.has(cleanSoundId)) cleanSoundId=nextUnansweredAfter(cleanSoundId);
+    const text=String(answer||'').trim();
+    if(!cleanSoundId||!text||answered.has(cleanSoundId)||!validSoundIds.has(cleanSoundId)) return false;
+    const sound=soundsById.get(cleanSoundId);
+    if(!sound) return false;
+    const recorded=recordJudgedAnswer(data,session,sound,text,{
+      inputMode,
+      at:event?.at||new Date().toISOString(),
+      recovered:true,
+      recoveredFromEventId:eventKey
+    });
+    if(!recorded.ok) return false;
+    answered.add(cleanSoundId);
+    if(eventKey) usedRecoveryEvents.add(eventKey);
+    appendMonitor(session,'server','answer_recovered','从客户端成功响应事件恢复答题记录',{soundId:cleanSoundId,answer:text.slice(0,80),eventId:event?.id||'',eventType:event?.type||''});
+    return true;
+  };
+  for(const event of events) {
+    const details=event?.details&&typeof event.details==='object' ? event.details : {};
+    if(details.soundId&&validSoundIds.has(details.soundId)) currentSoundId=details.soundId;
+    if(event.type==='question_rendered'&&details.soundId) currentSoundId=details.soundId;
+    if(event.type==='answer_submit'&&details.answer) {
+      lastSubmission={
+        soundId:details.soundId||currentSoundId,
+        answer:details.answer,
+        inputMode:details.inputMode||'text',
+        at:event.at
+      };
+    }
+    if(event.type==='answer_response'&&details.recorded&&details.answer) {
+      const soundId=details.soundId||lastSubmission?.soundId||currentSoundId;
+      const inputMode=details.inputMode||lastSubmission?.inputMode||'text';
+      if(recover(soundId,details.answer,event,inputMode)) changed=true;
+      lastSubmission=null;
+    }
+  }
+  return changed;
+}
 function normalizeStoreState(data) {
   let changed=false;
   if(!Array.isArray(data.sounds)) { data.sounds=[]; changed=true; }
@@ -474,6 +606,9 @@ function normalizeStoreState(data) {
         changed=true;
       }
     }
+  }
+  for(const session of data.sessions) {
+    if(recoverAnswersFromMonitor(data,session)) changed=true;
   }
   for(const user of data.users) {
     if(normalizeUserProgressState(data,user)) changed=true;
@@ -1425,8 +1560,11 @@ function recordJudgedAnswer(data, session, sound, answer, options={}) {
   if(options.transcriptionStatus) answerRecord.transcriptionStatus=String(options.transcriptionStatus);
   if(options.transcriptionReason) answerRecord.transcriptionReason=String(options.transcriptionReason).slice(0,200);
   if(options.recognized===false) answerRecord.recognized=false;
+  if(options.recovered) answerRecord.recovered=true;
+  if(options.recoveredFromEventId) answerRecord.recoveredFromEventId=String(options.recoveredFromEventId);
   session.answers.push(answerRecord);
   const testMode=isTestSession(session)||isTestUser(u)||Boolean(options.testMode);
+  if(!testMode) queueCloudAnswerSidecar(session,answerRecord);
   const countSoundStats=options.countSoundStats!==false&&Boolean(text);
   if(!testMode&&countSoundStats) {
     appendSoundAnswerHistory(sound,session,answerRecord);
@@ -2278,6 +2416,7 @@ async function handleRequest(req,res) { try {
       TEST_SESSIONS.set(session.id,session);
       return send(res,200,{sessionId:session.id,questions:q.map(publicSound),playthrough,testMode:true});
     }
+    queueCloudSessionSidecar(session);
     data.sessions.push(session);
     writeStore(data);
     return send(res,200,{sessionId:session.id,questions:q.map(publicSound),playthrough});

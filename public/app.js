@@ -1,6 +1,6 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const APP_VERSION = '0.1065-20260811';
+const APP_VERSION = '0.1066-20260811';
 const TEST_MODE = (() => {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -14,6 +14,13 @@ const DEVICE_COOKIE_NAME = 'voiceDetectiveDeviceId';
 const USER_COOKIE_NAME = 'voiceDetectiveUserId';
 const NAME_COOKIE_NAME = 'voiceDetectiveName';
 const CHANGELOG = [
+  {
+    version: '0.1066-20260811',
+    items: [
+      '增强云端答题记录写入确认，避免并发请求覆盖已提交答案。',
+      '语音和文字答题监控补充题目上下文，支持异常后恢复记录。'
+    ]
+  },
   {
     version: '0.1065-20260811',
     items: [
@@ -1160,13 +1167,14 @@ function addClientEvent(type, message, details = {}, postToServer = false) {
 
 async function postMonitorEvent(type, message, details = {}) {
   if (!game || !game.sessionId) return;
-  const key = `monitor-post:${game.sessionId}:${type}:${details && details.soundId ? details.soundId : ''}`;
+  const nextDetails = { ...currentQuestionContext(), ...details };
+  const key = `monitor-post:${game.sessionId}:${type}:${nextDetails && nextDetails.soundId ? nextDetails.soundId : ''}`;
   if (!noteAction(key, 260)) return;
   try {
     await fetch('/api/game/monitor-event', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: game.sessionId, type, message, details })
+      body: JSON.stringify({ sessionId: game.sessionId, type, message, details: nextDetails })
     });
   } catch (e) {
     addClientEvent('monitor_post_failed', '监控事件未能写入后端', { type });
@@ -1591,7 +1599,7 @@ async function submit(answer, inputMode = 'text', soundIdOverride = '') {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId: game.sessionId, soundId, answer, testMode: TEST_MODE })
     });
-    addClientEvent('answer_response', '前端已收到后端判断响应', { recorded: true, answer: r.answer }, true);
+    addClientEvent('answer_response', '前端已收到后端判断响应', { soundId, recorded: true, answer: r.answer, inputMode }, true);
     trackAnalytics('answer_response', { soundId: game.questions[index].id, recorded: true, durationMs: Date.now() - roundStartedAt });
     await goNext();
   } catch (e) {
