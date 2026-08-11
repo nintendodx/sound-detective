@@ -106,8 +106,11 @@ function looksLikeCodexTest(input={}, req={headers:{}}) {
     /HeadlessChrome|Playwright|Codex/i.test(ua)
   );
 }
+function allowVolatileTestMode() {
+  return !isCloudRuntime()||envFlag('DX100_ALLOW_CLOUD_TEST_MODE');
+}
 function isTestRequest(req, url, input={}) {
-  return Boolean(
+  return allowVolatileTestMode()&&Boolean(
     truthy(url.searchParams.get('test'))||
     truthy(url.searchParams.get('codexTest'))||
     truthy(req.headers['x-codex-test'])||
@@ -1448,22 +1451,94 @@ function cloudAssetKey(safe) {
   if(normalized.startsWith('图片文件/')) return `images/${path.basename(normalized)}`;
   return '';
 }
-async function serveFile(res, file, headers={}) {
+function requestHeader(req, name) {
+  const headers=req?.headers||{};
+  return headers[name]||headers[name.toLowerCase()]||headers[name.toUpperCase()]||'';
+}
+function parseByteRange(header, totalSize) {
+  const raw=String(header||'').trim();
+  if(!raw) return null;
+  if(totalSize<=0) return {unsatisfiable:true};
+  const match=raw.match(/^bytes=(\d*)-(\d*)$/);
+  if(!match) return {unsatisfiable:true};
+  const [,startText,endText]=match;
+  if(!startText&&!endText) return {unsatisfiable:true};
+  let start;
+  let end;
+  if(!startText) {
+    const suffix=Number(endText);
+    if(!Number.isSafeInteger(suffix)||suffix<=0) return {unsatisfiable:true};
+    start=Math.max(totalSize-suffix,0);
+    end=totalSize-1;
+  } else {
+    start=Number(startText);
+    end=endText ? Number(endText) : totalSize-1;
+    if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)) return {unsatisfiable:true};
+    if(end>=totalSize) end=totalSize-1;
+  }
+  if(start<0||end<start||start>=totalSize) return {unsatisfiable:true};
+  return {start,end};
+}
+function fileResponseHeaders(targetName, totalSize, headers={}, defaultCache='no-cache') {
+  return {
+    ...headers,
+    'Content-Type':headers['Content-Type']||MIME[path.extname(targetName).toLowerCase()]||'application/octet-stream',
+    'Cache-Control':headers['Cache-Control']||defaultCache,
+    'Accept-Ranges':'bytes',
+    'Content-Length':String(totalSize)
+  };
+}
+function sendRangeNotSatisfiable(req,res,targetName,totalSize,headers={},defaultCache='no-cache') {
+  res.writeHead(416,{
+    ...fileResponseHeaders(targetName,0,headers,defaultCache),
+    'Content-Range':`bytes */${totalSize}`,
+    'Content-Length':'0'
+  });
+  return res.end();
+}
+function serveBuffer(req,res,buffer,targetName,headers={},defaultCache='no-cache') {
+  const payload=Buffer.isBuffer(buffer)?buffer:Buffer.from(buffer);
+  const totalSize=payload.length;
+  const range=parseByteRange(requestHeader(req,'range'),totalSize);
+  if(range?.unsatisfiable) return sendRangeNotSatisfiable(req,res,targetName,totalSize,headers,defaultCache);
+  if(range) {
+    const chunk=payload.subarray(range.start,range.end+1);
+    res.writeHead(206,{
+      ...fileResponseHeaders(targetName,chunk.length,headers,defaultCache),
+      'Content-Range':`bytes ${range.start}-${range.end}/${totalSize}`
+    });
+    return req.method==='HEAD' ? res.end() : res.end(chunk);
+  }
+  res.writeHead(200,fileResponseHeaders(targetName,totalSize,headers,defaultCache));
+  return req.method==='HEAD' ? res.end() : res.end(payload);
+}
+function serveLocalFile(req,res,target,headers={}) {
+  const totalSize=fs.statSync(target).size;
+  const range=parseByteRange(requestHeader(req,'range'),totalSize);
+  if(range?.unsatisfiable) return sendRangeNotSatisfiable(req,res,target,totalSize,headers,'no-cache');
+  if(range) {
+    res.writeHead(206,{
+      ...fileResponseHeaders(target,range.end-range.start+1,headers,'no-cache'),
+      'Content-Range':`bytes ${range.start}-${range.end}/${totalSize}`
+    });
+    return req.method==='HEAD' ? res.end() : fs.createReadStream(target,{start:range.start,end:range.end}).pipe(res);
+  }
+  res.writeHead(200,fileResponseHeaders(target,totalSize,headers,'no-cache'));
+  return req.method==='HEAD' ? res.end() : fs.createReadStream(target).pipe(res);
+}
+async function serveFile(req, res, file, headers={}) {
   const safe=path.normalize(file).replace(/^\.\.(\/|\\|$)/,'');
   if(isCloudRuntime()) {
     const key=cloudAssetKey(safe);
     if(key) {
       const value=await activeCloudContext().store.get(key,{type:'arrayBuffer'});
       if(!value) return send(res,404,{error:'未找到资源'});
-      const targetName=path.basename(key);
-      res.writeHead(200,{'Content-Type':MIME[path.extname(targetName).toLowerCase()]||'application/octet-stream','Cache-Control':'public, max-age=3600',...headers});
-      return res.end(Buffer.from(value));
+      return serveBuffer(req,res,Buffer.from(value),path.basename(key),headers,'public, max-age=3600');
     }
   }
   const target=path.join(ROOT,safe);
   if(!target.startsWith(ROOT)||!fs.existsSync(target)||fs.statSync(target).isDirectory()) return send(res,404,{error:'未找到资源'});
-  res.writeHead(200,{'Content-Type':MIME[path.extname(target).toLowerCase()]||'application/octet-stream','Cache-Control':'no-cache',...headers});
-  fs.createReadStream(target).pipe(res);
+  return serveLocalFile(req,res,target,headers);
 }
 function isAdminAssetPath(p) {
   return /^\/public\/admin(?:[-.]|$)/.test(p);
@@ -1513,7 +1588,7 @@ async function serveAdminFile(req,res,file,setCookie=false) {
   const headers={'Cache-Control':'no-store'};
   const cookie=setCookie?adminCookieHeader():'';
   if(cookie) headers['Set-Cookie']=cookie;
-  return serveFile(res,file,headers);
+  return serveFile(req,res,file,headers);
 }
 async function writeUploadFile(filename, buffer) {
   const safe=path.basename(filename);
@@ -2113,9 +2188,9 @@ async function handleRequest(req,res) { try {
   const secretAdminFile=adminSecretFile(p);
   if(secretAdminFile) return serveAdminFile(req,res,secretAdminFile,true);
   if(isAdminPath(p)&&!isAdminAuthorized(req)) return send(res,404,{error:'未找到页面'});
-  if(p.startsWith('/api/demo-audio/')) { res.writeHead(200,{'Content-Type':'audio/wav','Cache-Control':'no-store'}); return res.end(wavDemo(p.split('/').pop())); }
-  if(p.startsWith('/uploads/')) return serveFile(res,p.slice(1));
-  if(p.startsWith('/images/')) return serveFile(res,path.join('图片文件',path.basename(decodeURIComponent(p.slice('/images/'.length)))));
+  if(p.startsWith('/api/demo-audio/')) return serveBuffer(req,res,wavDemo(p.split('/').pop()),`${p.split('/').pop()||'demo'}.wav`,{},'no-store');
+  if(p.startsWith('/uploads/')) return serveFile(req,res,p.slice(1));
+  if(p.startsWith('/images/')) return serveFile(req,res,path.join('图片文件',path.basename(decodeURIComponent(p.slice('/images/'.length)))));
   if(req.method==='GET'&&p==='/api/team-stats') return send(res,200,teamStats());
   if(req.method==='GET'&&p==='/api/team-models') return send(res,200,teamModels());
   if(req.method==='POST'&&p==='/api/game/audio-check'&&!takeRateLimit(`audio-check-pre:${clientIp(req)}`,{windowMs:30000,max:12,minIntervalMs:500})) {
@@ -2374,7 +2449,7 @@ async function handleRequest(req,res) { try {
       leaveRequestGuard(adminGuardKey,2500,30000);
     }
   }
-  if(p==='/'||p==='/index.html')return serveFile(res,'public/index.html'); if(p==='/team.html')return serveFile(res,'public/team.html'); if(p==='/admin.html')return serveAdminFile(req,res,'public/admin.html'); if(p==='/admin-users.html')return serveAdminFile(req,res,'public/admin-users.html'); if(p==='/admin-analytics.html')return serveAdminFile(req,res,'public/admin-analytics.html'); if(p==='/admin-tags.html')return serveAdminFile(req,res,'public/admin-tags.html'); if(p.startsWith('/public/'))return serveFile(res,p.slice(1));return send(res,404,{error:'未找到页面'});
+  if(p==='/'||p==='/index.html')return serveFile(req,res,'public/index.html'); if(p==='/team.html')return serveFile(req,res,'public/team.html'); if(p==='/admin.html')return serveAdminFile(req,res,'public/admin.html'); if(p==='/admin-users.html')return serveAdminFile(req,res,'public/admin-users.html'); if(p==='/admin-analytics.html')return serveAdminFile(req,res,'public/admin-analytics.html'); if(p==='/admin-tags.html')return serveAdminFile(req,res,'public/admin-tags.html'); if(p.startsWith('/public/'))return serveFile(req,res,p.slice(1));return send(res,404,{error:'未找到页面'});
 } catch(e) { console.error(e); send(res,400,{error:e.message||'请求处理失败'}); }}
 
 if(require.main===module) {

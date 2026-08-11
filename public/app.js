@@ -1,6 +1,6 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const APP_VERSION = '0.1064-20260810';
+const APP_VERSION = '0.1065-20260811';
 const TEST_MODE = (() => {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -9,11 +9,18 @@ const TEST_MODE = (() => {
     return false;
   }
 })();
-const PUBLIC_SHARE_URL = 'https://relationship-humanities-ericsson-nomination.trycloudflare.com/';
+const PUBLIC_SHARE_URL = 'https://dx100-sound-detective.netlify.app/';
 const DEVICE_COOKIE_NAME = 'voiceDetectiveDeviceId';
 const USER_COOKIE_NAME = 'voiceDetectiveUserId';
 const NAME_COOKIE_NAME = 'voiceDetectiveName';
 const CHANGELOG = [
+  {
+    version: '0.1065-20260811',
+    items: [
+      '修复云端音频在部分浏览器无法真正播放的问题。',
+      '线上禁用易丢失的内存测试会话，避免答题后本轮失效。'
+    ]
+  },
   {
     version: '0.1064-20260810',
     items: [
@@ -514,6 +521,7 @@ let audioPlayToken = 0;
 let audioPlayPendingSoundId = '';
 let audioPlayPendingAt = 0;
 let audioPlayConfirmTimer;
+let audioPlaybackConfirmCleanup;
 let confirmedPlaybackKey = '';
 let recording = false;
 let startingRecord = false;
@@ -1300,6 +1308,7 @@ async function startGame() {
 
 function clearSoundCache() {
   clearTimeout(audioPlayConfirmTimer);
+  clearPlaybackConfirmation();
   audioPlayPendingSoundId = '';
   audioPlayPendingAt = 0;
   confirmedPlaybackKey = '';
@@ -1317,6 +1326,7 @@ function renderQuestion() {
   const total = game.questions.length;
   audioPlayToken += 1;
   clearTimeout(audioPlayConfirmTimer);
+  clearPlaybackConfirmation();
   audioPlayPendingSoundId = '';
   audioPlayPendingAt = 0;
   confirmedPlaybackKey = '';
@@ -1411,9 +1421,56 @@ function markPlaybackNeedsAction(q, token, auto) {
   trackAnalytics('audio_play_unconfirmed', { soundId: q.id, auto: Boolean(auto), waitMs: Date.now() - audioPlayPendingAt });
 }
 
+function clearPlaybackConfirmation() {
+  if (audioPlaybackConfirmCleanup) {
+    audioPlaybackConfirmCleanup();
+    audioPlaybackConfirmCleanup = null;
+  }
+}
+
+function playbackHasStarted(currentAudio) {
+  if (!currentAudio || currentAudio.paused || currentAudio.ended) return false;
+  const played = currentAudio.played;
+  return currentAudio.currentTime > 0.04 || Boolean(played && played.length);
+}
+
+function bindPlaybackConfirmation(currentAudio, q, token) {
+  clearPlaybackConfirmation();
+  let finished = false;
+  const cleanup = () => {
+    currentAudio.removeEventListener('playing', confirm);
+    currentAudio.removeEventListener('timeupdate', confirmIfProgressed);
+  };
+  const complete = () => {
+    if (finished) return;
+    finished = true;
+    cleanup();
+    if (audioPlaybackConfirmCleanup === stop) audioPlaybackConfirmCleanup = null;
+  };
+  const confirm = () => {
+    if (token !== audioPlayToken || currentAudio !== audio) {
+      complete();
+      return;
+    }
+    if (markPlaybackConfirmed(q, token, currentAudio)) complete();
+  };
+  const confirmIfProgressed = () => {
+    if (playbackHasStarted(currentAudio)) confirm();
+  };
+  const stop = () => {
+    if (finished) return;
+    finished = true;
+    cleanup();
+  };
+  currentAudio.addEventListener('playing', confirm);
+  currentAudio.addEventListener('timeupdate', confirmIfProgressed);
+  audioPlaybackConfirmCleanup = stop;
+}
+
 function markPlaybackConfirmed(q, token, currentAudio) {
   if (token !== audioPlayToken || !q || game.questions[index]?.id !== q.id) return false;
   clearTimeout(audioPlayConfirmTimer);
+  clearPlaybackConfirmation();
   audioPlayPendingSoundId = '';
   audioPlayPendingAt = 0;
   confirmedPlaybackKey = playbackKey(q);
@@ -1467,13 +1524,19 @@ function play(q = game.questions[index], options = {}) {
   const playNow = () => {
     if (token !== audioPlayToken) return;
     audioPlayConfirmTimer = setTimeout(() => markPlaybackNeedsAction(q, token, options.auto), 2200);
+    bindPlaybackConfirmation(currentAudio, q, token);
     currentAudio.play()
       .then(() => {
-        markPlaybackConfirmed(q, token, currentAudio);
+        setTimeout(() => {
+          if (token === audioPlayToken && playbackHasStarted(currentAudio)) {
+            markPlaybackConfirmed(q, token, currentAudio);
+          }
+        }, 160);
       })
       .catch(e => {
         if (token !== audioPlayToken) return;
         clearTimeout(audioPlayConfirmTimer);
+        clearPlaybackConfirmation();
         audioPlayPendingSoundId = '';
         audioPlayPendingAt = 0;
         if (stage) stage.classList.remove('audio-loading', 'audio-playing');
