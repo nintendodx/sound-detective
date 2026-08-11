@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>声音侦探 管理后台</title>
+  <link rel="stylesheet" href="/public/admin.css?v=0.1049-20260807">
+</head>
+<body>
+  <aside>
+    <div class="logo">声音<span>侦探</span></div>
+    <small>管理后台</small>
+    <nav>
+      <a class="active" href="/admin.html">声音管理</a>
+      <a href="/admin-users.html">用户管理</a>
+      <a href="/admin-analytics.html">统计分析</a>
+    </nav>
+  </aside>
+  <main>
+    <header>
+      <div>
+        <h1>声音管理</h1>
+      </div>
+      <button id="openUpload">＋ 上传声音</button>
+    </header>
+    <section class="panel">
+      <div class="toolbar">
+        <input id="search" placeholder="搜索声音名称、标签或历史回答">
+        <span id="soundCount"></span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>声音</th>
+              <th>标签（用于判题）</th>
+              <th>上传时间</th>
+              <th>判断数</th>
+              <th>正确率</th>
+              <th>历史回答</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="sounds"></tbody>
+        </table>
+      </div>
+    </section>
+    <dialog id="upload">
+      <form method="dialog" id="uploadForm">
+        <h2>上传声音</h2>
+        <label>音频文件<input type="file" name="file" accept="audio/*" required></label>
+        <label>声音名称<input name="name" placeholder="例如：咖啡机研磨"></label>
+        <label>判题标签 <small>用逗号分隔同义表达</small><input name="tags" placeholder="咖啡机, 磨咖啡豆"></label>
+        <div class="actions">
+          <button value="cancel" class="secondary">取消</button>
+          <button class="save">上传并启用</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="historyDialog" class="history-dialog">
+      <div class="dialog-panel">
+        <div class="dialog-head">
+          <div>
+            <small>历史回答</small>
+            <h2 id="historyTitle">历史回答</h2>
+          </div>
+          <button id="historyClose" class="secondary" type="button">关闭</button>
+        </div>
+        <div class="history-dialog-body">
+          <section>
+            <h3>高频说法</h3>
+            <div id="historyStats" class="history-list large"></div>
+          </section>
+          <section>
+            <h3>全部记录</h3>
+            <div id="historyRecords" class="history-records"></div>
+          </section>
+        </div>
+      </div>
+    </dialog>
+  </main>
+  <script src="/public/admin.js?v=0.1049-20260807"></script>
+</body>
+</html>

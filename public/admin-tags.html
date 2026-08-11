@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>编辑声音 · 声音侦探</title>
+  <link rel="stylesheet" href="/public/admin.css?v=0.1049-20260807">
+  <style>
+    .tag-page{max-width:720px;margin:0 auto}
+    .back{display:inline-block;color:#3767d6;text-decoration:none;margin-bottom:28px}
+    .sound-name{font-size:16px;color:#778196;margin:6px 0 28px}
+    .field{display:grid;gap:8px;margin-bottom:22px}
+    .field label{color:#30384a}
+    .tag-editor{display:flex;flex-wrap:wrap;gap:10px;min-height:110px;padding:18px;background:#fafbfc;border:1px dashed #dce0e6;border-radius:11px}
+    .editable-tag{display:flex;align-items:center;gap:7px;background:#fff0ea;color:#c8522e;border-radius:20px;padding:7px 8px 7px 12px}
+    .remove-tag{background:#efc1b0;color:#9e351b;border-radius:50%;width:20px;height:20px;padding:0;line-height:1}
+    .add-row{display:flex;gap:10px;margin-top:18px}
+    .add-row input{flex:1}
+    .save-tags{margin-top:28px}
+    main.tag-main{width:100%;margin:0;padding-top:60px}
+  </style>
+</head>
+<body>
+  <main class="tag-main">
+    <div class="tag-page">
+      <a class="back" href="/admin.html">← 返回声音管理</a>
+      <h1 id="title">加载中…</h1>
+      <p class="sound-name" id="original"></p>
+      <section class="panel">
+        <div class="field">
+          <label for="soundName">声音名称</label>
+          <input id="soundName" maxlength="60" placeholder="例如：门铃声">
+        </div>
+        <h3>判题标签</h3>
+        <p style="color:#788195;font-size:14px">标签用于匹配玩家判断。点击标签右侧 × 即可删除。</p>
+        <div class="tag-editor" id="tags"></div>
+        <div class="add-row">
+          <input id="newTag" placeholder="输入一个新标签，例如：雨声">
+          <button id="add">添加标签</button>
+        </div>
+        <button class="save-tags" id="save">保存声音</button>
+      </section>
+    </div>
+  </main>
+  <script src="/public/admin-tags.js?v=0.1049-20260807"></script>
+</body>
+</html>

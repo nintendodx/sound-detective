@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>用户管理 · 声音侦探</title>
+  <link rel="stylesheet" href="/public/admin.css?v=0.1050-20260807">
+</head>
+<body>
+  <aside>
+    <div class="logo">声音<span>侦探</span></div>
+    <small>管理后台</small>
+    <nav>
+      <a href="/admin.html">声音管理</a>
+      <a class="active" href="/admin-users.html">用户管理</a>
+      <a href="/admin-analytics.html">统计分析</a>
+    </nav>
+  </aside>
+  <main>
+    <header>
+      <div>
+        <h1>用户管理</h1>
+      </div>
+    </header>
+    <section class="panel table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>用户名</th>
+            <th>初次访问</th>
+            <th>最后访问</th>
+            <th>累计答题</th>
+            <th>历史整体正确率</th>
+          </tr>
+        </thead>
+        <tbody id="userRows"></tbody>
+      </table>
+    </section>
+  </main>
+  <script src="/public/admin-users.js?v=0.1050-20260807"></script>
+</body>
+</html>

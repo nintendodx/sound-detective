@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>统计分析 · 声音侦探</title>
+  <link rel="stylesheet" href="/public/admin.css?v=0.1049-20260807">
+</head>
+<body>
+  <aside>
+    <div class="logo">声音<span>侦探</span></div>
+    <small>管理后台</small>
+    <nav>
+      <a href="/admin.html">声音管理</a>
+      <a href="/admin-users.html">用户管理</a>
+      <a class="active" href="/admin-analytics.html">统计分析</a>
+    </nav>
+  </aside>
+  <main>
+    <header>
+      <div>
+        <h1>统计分析</h1>
+        <p id="analyticsUpdated">正在读取埋点数据...</p>
+      </div>
+      <button id="refreshAnalytics" type="button">刷新</button>
+    </header>
+    <section class="metric-grid" id="metricGrid"></section>
+    <section class="panel analytics-panel">
+      <h2>录音与识别</h2>
+      <div class="metric-grid compact" id="recordingGrid"></div>
+    </section>
+    <section class="panel analytics-panel">
+      <h2>页面停留</h2>
+      <div class="table-wrap">
+        <table class="analytics-table">
+          <thead><tr><th>页面/区块</th><th>次数</th><th>平均停留</th><th>P95</th><th>最长</th></tr></thead>
+          <tbody id="pageRows"></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel analytics-panel">
+      <h2>接口耗时</h2>
+      <div class="table-wrap">
+        <table class="analytics-table">
+          <thead><tr><th>接口</th><th>请求数</th><th>错误</th><th>平均耗时</th><th>P95</th><th>最近</th></tr></thead>
+          <tbody id="apiRows"></tbody>
+        </table>
+      </div>
+    </section>
+    <section class="panel analytics-panel">
+      <h2>事件分布</h2>
+      <div id="eventCounts" class="event-pills"></div>
+    </section>
+    <section class="panel analytics-panel">
+      <h2>最近事件</h2>
+      <div class="table-wrap">
+        <table class="analytics-table">
+          <thead><tr><th>时间</th><th>事件</th><th>用户/设备</th><th>页面</th><th>详情</th></tr></thead>
+          <tbody id="recentRows"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="/public/admin-analytics.js?v=0.1049-20260807"></script>
+</body>
+</html>

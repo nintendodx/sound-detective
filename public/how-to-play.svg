@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" role="img" aria-labelledby="title desc">
+  <title id="title">划火柴声音回答示例</title>
+  <desc id="desc">听到划火柴的声音后，可以回答划火柴或火柴。</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#fff9f1"/>
+      <stop offset="1" stop-color="#eef4ff"/>
+    </linearGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#d89957"/>
+      <stop offset=".52" stop-color="#f0c187"/>
+      <stop offset="1" stop-color="#b96d35"/>
+    </linearGradient>
+    <linearGradient id="flame" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff2a8"/>
+      <stop offset=".45" stop-color="#ffb02e"/>
+      <stop offset="1" stop-color="#ff5a31"/>
+    </linearGradient>
+    <filter id="shadow" x="-18%" y="-22%" width="136%" height="150%">
+      <feDropShadow dx="0" dy="15" stdDeviation="18" flood-color="#172033" flood-opacity=".14"/>
+    </filter>
+    <filter id="glow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation="9" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="900" height="520" rx="34" fill="url(#bg)"/>
+  <circle cx="820" cy="72" r="78" fill="#ff6a3d" opacity=".10"/>
+  <circle cx="84" cy="448" r="92" fill="#2d6cf5" opacity=".09"/>
+
+  <text x="56" y="72" fill="#172033" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="38" font-weight="900">听声音，直接说是什么</text>
+  <g filter="url(#shadow)">
+    <rect x="56" y="154" width="330" height="282" rx="28" fill="#fff"/>
+    <rect x="434" y="154" width="410" height="282" rx="28" fill="#fff"/>
+  </g>
+
+  <g font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif">
+    <text x="91" y="222" fill="#172033" font-size="28" font-weight="900">听到“嚓”的摩擦声</text>
+
+    <g transform="translate(103 332) rotate(-18)">
+      <rect x="0" y="0" width="218" height="18" rx="9" fill="url(#wood)"/>
+      <rect x="14" y="3" width="150" height="3" rx="2" fill="#ffe1b8" opacity=".75"/>
+      <ellipse cx="232" cy="9" rx="31" ry="22" fill="#8e2f27"/>
+      <ellipse cx="227" cy="4" rx="22" ry="14" fill="#d94f3b"/>
+      <path d="M248 -12 C292 -54 300 8 270 39 C289 13 259 13 248 -12Z" fill="#ff6a3d" filter="url(#glow)"/>
+      <path d="M257 -5 C282 -30 284 10 267 28 C277 12 262 10 257 -5Z" fill="url(#flame)"/>
+    </g>
+
+    <g transform="translate(106 372)">
+      <rect x="0" y="0" width="206" height="18" rx="9" fill="#2f3140"/>
+      <path d="M12 5 H188" stroke="#ffb866" stroke-width="4" stroke-linecap="round" stroke-dasharray="18 16"/>
+      <path d="M222 -88 l18 -20 M236 -64 l26 -6 M202 -112 l-8 -24" stroke="#ffb866" stroke-width="8" stroke-linecap="round"/>
+      <path d="M205 -45 C170 -44 133 -50 96 -64" fill="none" stroke="#ffb866" stroke-width="8" stroke-linecap="round" opacity=".65"/>
+    </g>
+
+    <text x="475" y="209" fill="#172033" font-size="28" font-weight="900">你可以这样答</text>
+    <g>
+      <rect x="478" y="238" width="238" height="62" rx="31" fill="#172033"/>
+      <path d="M530 297 l-22 31 l61 -36" fill="#172033"/>
+      <text x="597" y="279" text-anchor="middle" fill="#fff" font-size="31" font-weight="900">划火柴</text>
+    </g>
+    <g>
+      <rect x="478" y="330" width="178" height="62" rx="31" fill="#172033"/>
+      <path d="M530 389 l-22 31 l61 -36" fill="#172033"/>
+      <text x="567" y="371" text-anchor="middle" fill="#fff" font-size="31" font-weight="900">火柴</text>
+    </g>
+  </g>
+</svg>

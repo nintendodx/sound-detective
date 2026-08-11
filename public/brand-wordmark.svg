@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="146" viewBox="0 0 720 146" role="img" aria-labelledby="title desc">
+  <title id="title">声音侦探</title>
+  <desc id="desc">声音侦探品牌字标，四个字使用一致颜色，不使用方框和放大镜。</desc>
+  <defs>
+    <filter id="textShadow" x="-8%" y="-20%" width="116%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="6" flood-color="#172033" flood-opacity=".10"/>
+    </filter>
+  </defs>
+  <path d="M70 92 C132 46 186 122 248 78 S360 38 426 82 S542 114 648 54" fill="none" stroke="#ffd09b" stroke-width="20" stroke-linecap="round" opacity=".85"/>
+  <g fill="none" stroke="#2d6cf5" stroke-linecap="round">
+    <path d="M48 54 q22 18 0 36" stroke-width="9"/>
+    <path d="M28 42 q38 30 0 60" stroke-width="8" opacity=".72"/>
+    <path d="M688 54 q-22 18 0 36" stroke-width="9"/>
+    <path d="M708 42 q-38 30 0 60" stroke-width="8" opacity=".72"/>
+  </g>
+  <g font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="82" font-weight="900" letter-spacing="3" filter="url(#textShadow)">
+    <text x="360" y="93" text-anchor="middle" fill="#172033">声音侦探</text>
+  </g>
+  <g stroke="#ff6a3d" stroke-linecap="round">
+    <path d="M214 114 h292" stroke-width="8"/>
+    <path d="M532 113 h28" stroke-width="8"/>
+    <path d="M160 113 h28" stroke-width="8"/>
+  </g>
+</svg>

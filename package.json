@@ -1,0 +1,22 @@
+{
+  "name": "dx100-sound-game",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "check": "node --check server.js && node --check scripts/build-netlify.js && node --check scripts/release-cloud.js && node --check scripts/sync-cloud-data.mjs",
+    "build:netlify": "node scripts/build-netlify.js",
+    "cloud:push": "node scripts/sync-cloud-data.mjs push",
+    "cloud:pull": "node scripts/sync-cloud-data.mjs pull",
+    "cloud:list": "node scripts/sync-cloud-data.mjs list",
+    "release:cloud": "node scripts/release-cloud.js",
+    "release:preview": "node scripts/release-cloud.js --preview"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^9.1.5"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

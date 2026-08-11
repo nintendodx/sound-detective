@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>声音侦探</title>
+  <link rel="stylesheet" href="/public/style.css?v=0.1064-20260810">
+</head>
+<body>
+  <main class="app">
+    <section id="welcome">
+      <div class="version-chip">
+        <button id="changelogOpen" class="changelog-icon" type="button" aria-label="查看更新日志" title="更新日志">!</button>
+        <span id="appVersion">0.1064-20260810</span>
+      </div>
+      <a class="home-team-link" href="/team.html">Credits</a>
+      <div class="hero">
+        <h1 class="brand-title">
+          <img src="/public/brand-wordmark.svg?v=0.1064-20260810" alt="声音侦探">
+        </h1>
+      </div>
+      <img class="howto-image" src="/public/how-to-play.svg?v=0.1064-20260810" alt="划火柴声音回答示例">
+      <div class="card">
+        <label for="name">你的昵称</label>
+        <input class="input" id="name" maxlength="20" placeholder="例如：王牌侦探" autocomplete="nickname">
+        <button class="primary" id="start" type="button">开始挑战</button>
+        <button class="share history-open" id="historyOpen" type="button">过往成绩</button>
+        <button class="share" data-share type="button">分享给朋友</button>
+      </div>
+    </section>
+
+    <section id="quiz" class="hidden">
+      <div class="game-title">
+        <div class="brand">声音<i>侦探</i></div>
+        <div class="question" id="qcount">第 1 题 / 共 5 题</div>
+      </div>
+      <div class="steps" id="steps"></div>
+      <div class="quiz-focus">
+        <div class="sound-stage" id="audioOrb">
+          <div class="sound-badge" id="soundStageBadge">第 1 题</div>
+          <div class="sound-wave" aria-hidden="true">
+            <i></i><i></i><i></i><i></i><i></i>
+          </div>
+          <span id="soundStageText">准备播放声音</span>
+        </div>
+        <div class="playback-notice" id="playbackNotice" aria-live="polite">准备播放声音</div>
+      </div>
+      <div class="answer-area">
+        <div class="answer-wrap">
+          <div class="replay-zone">
+            <button class="replay" id="replay" type="button">↻ 再听一次</button>
+          </div>
+          <button class="record" id="record" type="button">说出你的判断</button>
+          <div class="switch" id="switch">或手动输入判断</div>
+          <div id="textAnswer" class="hidden">
+            <input class="input" id="answerText" placeholder="输入你听到的物品或场景">
+            <button class="primary" id="submitText" type="button">提交判断</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="feedback" class="feedback hidden">
+      <div class="result-icon" id="resultIcon"></div>
+      <h1 id="resultTitle"></h1>
+      <p id="resultText"></p>
+      <button class="primary next" id="next" type="button">下一题</button>
+    </section>
+
+    <section id="summary" class="summary-page hidden">
+      <h1>你的侦查成果</h1>
+      <div class="result-stage">
+        <div class="result-art">
+          <img class="result-art-bg" id="summaryImageBg" alt="" aria-hidden="true">
+          <img class="result-art-main" id="summaryImage" alt="">
+        </div>
+        <div class="result-copy">
+          <div class="score" id="score"></div>
+          <p class="result-sub">本轮猜中 <span id="correctNum"></span> 题</p>
+          <p class="result-quote" id="summaryQuote"></p>
+        </div>
+      </div>
+      <div class="card answer-review">
+        <b>本轮判断回顾</b>
+        <div id="answerReview"></div>
+      </div>
+      <div class="card ranking">
+        <b>侦探排行榜 · 正确率 TOP 5</b>
+        <p class="rank-note">仅展示至少完成 1 轮的玩家</p>
+        <div id="ranking"></div>
+      </div>
+      <button class="primary" id="again" type="button">再来 5 题</button>
+      <button class="share" data-share type="button">分享给朋友</button>
+    </section>
+
+    <section id="complete" class="finish summary-page hidden">
+      <div class="eyebrow">全部完成</div>
+      <h1>你完成了<br>所有声音挑战！</h1>
+      <div class="result-stage complete-stage">
+        <div class="result-art">
+          <img class="result-art-bg" id="completeImageBg" alt="" aria-hidden="true">
+          <img class="result-art-main" id="completeImage" alt="">
+        </div>
+        <div class="result-copy">
+          <p class="result-quote" id="completeQuote"></p>
+          <b id="finishRank"></b>
+          <p class="result-sub" id="finishText"></p>
+        </div>
+      </div>
+      <div class="card answer-review">
+        <b>本轮判断回顾</b>
+        <div id="completeAnswerReview"></div>
+      </div>
+      <div class="card ranking">
+        <b>完成全部挑战的侦探</b>
+        <p class="rank-note">按完成时间倒序，当前侦探置顶</p>
+        <div id="completeRanking"></div>
+      </div>
+      <button class="primary" id="completeAgain" type="button">重新开始</button>
+      <button class="share" data-share type="button">分享给朋友</button>
+    </section>
+  </main>
+  <div class="modal hidden" id="changelogModal" role="dialog" aria-modal="true" aria-labelledby="changelogTitle">
+    <div class="modal-backdrop" id="changelogBackdrop"></div>
+    <div class="modal-card changelog-card">
+      <div class="modal-head">
+        <div>
+          <span>Demo 更新日志</span>
+          <b id="changelogTitle">0.1064-20260810</b>
+        </div>
+        <button id="changelogClose" type="button" aria-label="关闭更新日志">×</button>
+      </div>
+      <div class="changelog-list" id="changelogList"></div>
+    </div>
+  </div>
+  <div class="modal hidden" id="historyModal" role="dialog" aria-modal="true" aria-labelledby="historyTitle">
+    <div class="modal-backdrop" id="historyBackdrop"></div>
+    <div class="modal-card history-card">
+      <div class="modal-head">
+        <div>
+          <b id="historyTitle">你的游玩记录</b>
+        </div>
+        <button id="historyClose" type="button" aria-label="关闭过往成绩">×</button>
+      </div>
+      <div class="history-content" id="historyContent"></div>
+    </div>
+  </div>
+  <div class="toast hidden" id="toast"></div>
+  <script src="/public/app.js?v=0.1064-20260810"></script>
+</body>
+</html>
