@@ -1,6 +1,6 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const APP_VERSION = '0.1067-20260811';
+const APP_VERSION = '0.1068-20260811';
 const TEST_MODE = (() => {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -14,6 +14,14 @@ const DEVICE_COOKIE_NAME = 'voiceDetectiveDeviceId';
 const USER_COOKIE_NAME = 'voiceDetectiveUserId';
 const NAME_COOKIE_NAME = 'voiceDetectiveName';
 const CHANGELOG = [
+  {
+    version: '0.1068-20260811',
+    items: [
+      '调整线上缓存策略，发布后浏览器会重新校验页面脚本和样式。',
+      '修复 HTML 资源版本号未同步导致 Safari 可能继续加载旧文件的问题。',
+      '答题底部栏改为占位式贴底布局，减少 Safari 页面重叠。'
+    ]
+  },
   {
     version: '0.1067-20260811',
     items: [
@@ -618,6 +626,28 @@ function storageSet(key, value) {
     if (window.localStorage) window.localStorage.setItem(key, value);
   } catch (e) {}
   return value;
+}
+
+function clearAppRuntimeCaches() {
+  try {
+    if (navigator.serviceWorker && typeof navigator.serviceWorker.getRegistrations === 'function') {
+      navigator.serviceWorker.getRegistrations()
+        .then(registrations => registrations.forEach(registration => registration.unregister().catch(() => {})))
+        .catch(() => {});
+    }
+  } catch (e) {}
+  try {
+    if (window.caches && typeof caches.keys === 'function') {
+      caches.keys()
+        .then(keys => keys.filter(key => /voice|detective|dx100|sound/i.test(key)).forEach(key => caches.delete(key).catch(() => {})))
+        .catch(() => {});
+    }
+  } catch (e) {}
+  const previousVersion = storageGet('appVersion');
+  if (previousVersion !== APP_VERSION) {
+    storageSet('appVersion', APP_VERSION);
+    storageSet('appVersionSeenAt', new Date().toISOString());
+  }
 }
 
 function cookieGet(name) {
@@ -2545,6 +2575,7 @@ function bindUiEvents() {
 
 function init() {
   try {
+    clearAppRuntimeCaches();
     deviceId = getDeviceId();
     applyRememberedIdentity();
     trackAnalytics('page_load', { referrer: document.referrer || '', title: document.title || '' });
