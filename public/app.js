@@ -1,6 +1,6 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const APP_VERSION = '0.1070-20260811';
+const APP_VERSION = '0.1071-20260812';
 const TEST_MODE = (() => {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -14,6 +14,13 @@ const DEVICE_COOKIE_NAME = 'voiceDetectiveDeviceId';
 const USER_COOKIE_NAME = 'voiceDetectiveUserId';
 const NAME_COOKIE_NAME = 'voiceDetectiveName';
 const CHANGELOG = [
+  {
+    version: '0.1071-20260812',
+    items: [
+      '版本号文字和图标现在都可以打开更新日志。',
+      'Credits 中将声音来源标注为声音素材 小森平。'
+    ]
+  },
   {
     version: '0.1070-20260811',
     items: [

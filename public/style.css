@@ -61,9 +61,15 @@ button:disabled {
   display: flex;
   align-items: center;
   gap: 7px;
+  border: 0;
+  padding: 0;
+  background: transparent;
   color: var(--muted);
+  font: inherit;
   font-size: 12px;
   font-weight: 800;
+  text-align: left;
+  cursor: pointer;
   z-index: 3;
 }
 .version-chip span {
@@ -82,6 +88,9 @@ button:disabled {
   font-weight: 900;
   line-height: 1;
   box-shadow: 0 8px 22px #1720331f;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
 }
 .home-team-link {
   position: absolute;
