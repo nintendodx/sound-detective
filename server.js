@@ -2873,10 +2873,11 @@ async function handleRequest(req,res) { try {
     if(!enterRequestGuard(answerGuardKey,3000,20000)) return sendRateLimited(res,'本题判断正在提交，请稍候',1600);
     try {
     const testMode=isTestSession(session)||isTestUser(u)||isTestRequest(req,url,x);
-    if(session.answers.some(a=>a.soundId===sound.id)){appendMonitor(session,'server','answer_rejected','后端拒绝重复答题',{soundId:x.soundId});if(!testMode)writeStore(data);return send(res,409,{error:'本题已作答'});}
+    const existingAnswer=session.answers.find(a=>a.soundId===sound.id);
+    if(existingAnswer){appendMonitor(session,'server','answer_duplicate_accepted','本题已记录，后端按幂等成功返回',{soundId:x.soundId});if(!testMode)writeStore(data);return send(res,200,{ok:true,duplicate:true,answer:existingAnswer.answer||'',testMode});}
     appendMonitor(session,'server','answer_received','后端已收到文字答案',{soundId:sound.id,answer:String(x.answer||'').slice(0,80),answerLength:String(x.answer||'').length});
     const recorded=recordJudgedAnswer(data,session,sound,x.answer,{inputMode:'text',testMode});
-    if(!recorded.ok&&recorded.duplicate)return send(res,409,{error:'本题已作答'});
+    if(!recorded.ok&&recorded.duplicate)return send(res,200,{ok:true,duplicate:true,answer:x.answer,testMode});
     if(!recorded.ok)return send(res,404,{error:recorded.error||'题目不存在'});
     appendMonitor(session,'server','judge_completed','后端已完成判题',{soundId:sound.id,recorded:true});
     if(!testMode) writeStore(data);
