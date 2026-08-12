@@ -1,6 +1,6 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const APP_VERSION = '0.1071-20260812';
+const APP_VERSION = '0.1072-20260812';
 const TEST_MODE = (() => {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -14,6 +14,13 @@ const DEVICE_COOKIE_NAME = 'voiceDetectiveDeviceId';
 const USER_COOKIE_NAME = 'voiceDetectiveUserId';
 const NAME_COOKIE_NAME = 'voiceDetectiveName';
 const CHANGELOG = [
+  {
+    version: '0.1072-20260812',
+    items: [
+      '后台用户数据新增系统和浏览器版本识别。',
+      '统计分析增加语音链路、ASR 和浏览器兼容性诊断维度。'
+    ]
+  },
   {
     version: '0.1071-20260812',
     items: [
@@ -820,6 +827,12 @@ function analyticsPayload(type, details = {}) {
   };
 }
 
+function clientPayload() {
+  return {
+    userAgent: navigator.userAgent || ''
+  };
+}
+
 function analyticsCooldownMs(type) {
   return {
     audio_play_request: 700,
@@ -1257,7 +1270,7 @@ async function createOrRefreshUser() {
   user = await api('/api/users', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: playerName(), deviceId, testMode: TEST_MODE })
+    body: JSON.stringify({ name: playerName(), deviceId, testMode: TEST_MODE, ...clientPayload() })
   });
   rememberUserIdentity(user);
   addClientEvent('user_ready', '用户已创建或更新', { userId: user.id });
@@ -1340,7 +1353,7 @@ async function startGame() {
   const actionKey = `game-start:${user?.id || deviceId || 'anonymous'}`;
   if (!beginAction(actionKey, 1800, '正在进入下一轮，请稍候')) return null;
   try {
-    const startPayload = () => JSON.stringify({ userId: user.id, deviceId, name: playerName(), testMode: TEST_MODE });
+    const startPayload = () => JSON.stringify({ userId: user.id, deviceId, name: playerName(), testMode: TEST_MODE, ...clientPayload() });
     let nextGame;
     try {
       nextGame = await api('/api/game/start', {

@@ -362,6 +362,10 @@ input {
   margin: 0 0 14px;
   font-size: 19px;
 }
+.analytics-panel h3 {
+  margin: 20px 0 10px;
+  font-size: 15px;
+}
 .analytics-table {
   min-width: 760px;
 }
@@ -375,6 +379,9 @@ input {
   display: flex;
   flex-wrap: wrap;
   gap: 9px;
+}
+.analytics-pills {
+  margin: 14px 0;
 }
 .event-pill {
   display: inline-flex;

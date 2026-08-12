@@ -274,6 +274,87 @@ function isMergeableUserName(name) {
 function cleanDeviceId(value) {
   return String(value||'').trim().slice(0,80);
 }
+function cleanUserAgent(value) {
+  return String(value||'').trim().slice(0,240);
+}
+function browserMajor(version='') {
+  const major=String(version||'').split('.')[0];
+  return /^\d+$/.test(major) ? major : '';
+}
+function parseClientInfo(userAgent='') {
+  const ua=cleanUserAgent(userAgent);
+  let browser='未知', browserVersion='', match;
+  const browserRules=[
+    ['微信',/MicroMessenger\/(\d+(?:\.\d+)*)/],
+    ['Edge',/Edg\/(\d+(?:\.\d+)*)/],
+    ['Chrome',/(?:CriOS|Chrome)\/(\d+(?:\.\d+)*)/],
+    ['Firefox',/(?:FxiOS|Firefox)\/(\d+(?:\.\d+)*)/],
+    ['Safari',/Version\/(\d+(?:\.\d+)*).*Safari/]
+  ];
+  for(const [name,re] of browserRules) {
+    match=ua.match(re);
+    if(match) {
+      browser=name;
+      browserVersion=match[1]||'';
+      break;
+    }
+  }
+  let os='未知', osVersion='';
+  if((match=ua.match(/iPhone OS ([\d_]+)/))) {
+    os='iOS';
+    osVersion=match[1].replace(/_/g,'.');
+  } else if((match=ua.match(/CPU OS ([\d_]+)/))) {
+    os='iPadOS';
+    osVersion=match[1].replace(/_/g,'.');
+  } else if((match=ua.match(/Android ([\d.]+)/))) {
+    os='Android';
+    osVersion=match[1];
+  } else if((match=ua.match(/Mac OS X ([\d_]+)/))) {
+    os='macOS';
+    osVersion=match[1].replace(/_/g,'.');
+  } else if((match=ua.match(/Windows NT ([\d.]+)/))) {
+    os='Windows';
+    osVersion=match[1];
+  }
+  let deviceType='desktop';
+  if(/iPhone|Android.*Mobile|Mobile/i.test(ua)) deviceType='mobile';
+  else if(/iPad|Tablet|Android/i.test(ua)) deviceType='tablet';
+  if(/MicroMessenger/i.test(ua)) deviceType=deviceType==='desktop'?'desktop':deviceType;
+  return {
+    userAgent:ua,
+    os,
+    osVersion,
+    browser,
+    browserVersion,
+    browserMajor:browserMajor(browserVersion),
+    deviceType
+  };
+}
+function clientLabel(client={}) {
+  const os=[client.os,client.osVersion].filter(Boolean).join(' ')||'未知系统';
+  const browser=[client.browser,client.browserVersion].filter(Boolean).join(' ')||'未知浏览器';
+  return `${os} / ${browser}`;
+}
+function clientInfoFrom(input={}, req=null, at='') {
+  const userAgent=cleanUserAgent(input.userAgent||req?.headers?.['user-agent']||'');
+  if(!userAgent) return null;
+  return {...parseClientInfo(userAgent), updatedAt:at||new Date().toISOString()};
+}
+function mergeClientInfo(a=null, b=null) {
+  if(!a&&!b) return null;
+  if(!a) return {...b};
+  if(!b) return {...a};
+  return new Date(b.updatedAt||0)>=new Date(a.updatedAt||0) ? {...a,...b} : {...b,...a};
+}
+function applyUserClientInfo(user, input={}, req=null, at='') {
+  if(!user) return false;
+  const next=clientInfoFrom(input,req,at);
+  if(!next) return false;
+  const merged=mergeClientInfo(user.client,next);
+  if(JSON.stringify(user.client||null)===JSON.stringify(merged)) return false;
+  user.client=merged;
+  return true;
+}
 function deviceIdsFor(...items) {
   const ids=[];
   const add=value=>{
@@ -438,11 +519,13 @@ function upsertRealUser(data, input={}) {
   }
   if(!u) {
     u={id:crypto.randomUUID(),deviceId,name:displayUserName(inputName),firstSeen:now,lastSeen:now,total:0,correct:0,answers:[],playthrough:1,libraryCompletionPending:null,libraryCompletionShown:[],deviceIds:[deviceId]};
+    applyUserClientInfo(u,input,null,now);
     data.users.push(u);
   } else {
     if(inputName) u.name=inputName;
     u.deviceId=deviceId;
     normalizeUserIdentity(u,[deviceId]);
+    applyUserClientInfo(u,input,null,now);
     u.lastSeen=now;
   }
   return u;
@@ -793,6 +876,7 @@ function mergeUser(a={}, b={}) {
     total:Math.max(Number(a.total||0),Number(b.total||0)),
     correct:Math.max(Number(a.correct||0),Number(b.correct||0)),
     answers:[...new Set([...(a.answers||[]),...(b.answers||[])])],
+    client:mergeClientInfo(a.client,b.client),
     libraryCompletionPending:hasIncomingPending ? b.libraryCompletionPending : (a.libraryCompletionPending||null),
     libraryCompletionShown:mergeCompletionShown(a.libraryCompletionShown,b.libraryCompletionShown)
   };
@@ -1127,6 +1211,25 @@ function userAnswerTotals(u, sessions=[]) {
   return {total,correct,accuracy:total ? Math.round(correct/total*100) : 0};
 }
 function userPublic(u, allSounds, sessions=[]) { const progress=libraryProgress(u, allSounds, sessions); const totals=userAnswerTotals(u,sessions); return { ...u, ...totals, answeredCount:progress.libraryAnswered, completion:progress.libraryCompletion, ...progress, libraryCompletionPending:Boolean(activeLibraryCompletionPending(u)) }; }
+function clientInfoFromEvent(event) {
+  if(event?.client&&event.client.userAgent) return {...event.client,updatedAt:event.at||event.client.updatedAt||''};
+  const userAgent=cleanUserAgent(event?.userAgent||'');
+  return userAgent ? {...parseClientInfo(userAgent),updatedAt:event?.at||''} : null;
+}
+function latestClientForUser(data, u) {
+  if(u?.client?.userAgent) return u.client;
+  const ids=new Set(deviceIdsFor(u));
+  const events=[...(data.analyticsEvents||[])]
+    .filter(e=>e&&((u?.id&&e.userId===u.id)||(e.deviceId&&ids.has(e.deviceId)))&&cleanUserAgent(e.userAgent||e.client?.userAgent||''))
+    .sort((a,b)=>eventTime(b)-eventTime(a));
+  return clientInfoFromEvent(events[0])||null;
+}
+function userPublicWithClient(data, u, allSounds=data.sounds, sessions=[]) {
+  const out=userPublic(u,allSounds,sessions);
+  out.client=latestClientForUser(data,u);
+  out.clientLabel=out.client ? clientLabel(out.client) : '';
+  return out;
+}
 function completeRankingForUsers(data, currentUser=null) {
   const currentId=currentUser?.id||'';
   const rows=(data.users||[]).filter(u=>!isTestUser(u)).map(u=>{
@@ -1256,7 +1359,7 @@ function adminUserAnswerHistory(data, u) {
     };
   });
   return {
-    user:userPublic(u,data.sounds,sessionList),
+    user:userPublicWithClient(data,u,data.sounds,sessionList),
     generatedAt:new Date().toISOString(),
     rounds
   };
@@ -1581,8 +1684,12 @@ function groupBy(list, keyFn) {
   }
   return map;
 }
+function inc(map, key, amount=1) {
+  map.set(key||'未分类',(map.get(key||'未分类')||0)+amount);
+}
 function analyticsEvent(input={}, req) {
   const details=input.details&&typeof input.details==='object' ? input.details : {};
+  const userAgent=cleanUserAgent(input.userAgent||req.headers['user-agent']||'');
   const event={
     id:crypto.randomUUID(),
     at:new Date().toISOString(),
@@ -1595,7 +1702,8 @@ function analyticsEvent(input={}, req) {
     page:String(input.page||'').slice(0,80),
     path:String(input.path||'').slice(0,160),
     appVersion:String(input.appVersion||'').slice(0,40),
-    userAgent:String(input.userAgent||req.headers['user-agent']||'').slice(0,240),
+    userAgent,
+    client:userAgent ? parseClientInfo(userAgent) : null,
     viewport:input.viewport&&typeof input.viewport==='object' ? {
       width:Number(input.viewport.width||0),
       height:Number(input.viewport.height||0)
@@ -1610,7 +1718,124 @@ function appendAnalyticsEvent(data, input, req) {
   data.analyticsEvents=Array.isArray(data.analyticsEvents)?data.analyticsEvents:[];
   data.analyticsEvents.push(event);
   if(data.analyticsEvents.length>ANALYTICS_MAX_EVENTS) data.analyticsEvents=data.analyticsEvents.slice(-ANALYTICS_MAX_EVENTS);
+  const u=(event.userId&&getUserById(data,event.userId))||findRealUserByDeviceId(data,event.deviceId);
+  if(u&&!isTestUser(u)) applyUserClientInfo(u,{userAgent:event.userAgent},null,event.at);
   return event;
+}
+function statRows(map, limit=12) {
+  return [...map.entries()]
+    .map(([key,count])=>({key,count}))
+    .sort((a,b)=>b.count-a.count||a.key.localeCompare(b.key))
+    .slice(0,limit);
+}
+function osBucket(client={}) {
+  return [client.os,client.osVersion ? String(client.osVersion).split('.')[0] : ''].filter(Boolean).join(' ')||'未知系统';
+}
+function browserBucket(client={}) {
+  return [client.browser,client.browserMajor||browserMajor(client.browserVersion)].filter(Boolean).join(' ')||'未知浏览器';
+}
+function eventClient(event={}) {
+  return clientInfoFromEvent(event)||{os:'未知',browser:'未知',deviceType:'unknown'};
+}
+function clientStats(data, events) {
+  const os=new Map(), browsers=new Map(), combos=new Map(), devices=new Map();
+  const users=(data.users||[]).filter(u=>!isTestUser(u)).map(u=>{
+    const client=latestClientForUser(data,u);
+    if(client) {
+      inc(os,osBucket(client));
+      inc(browsers,browserBucket(client));
+      inc(combos,clientLabel(client));
+      inc(devices,client.deviceType||'unknown');
+    }
+    return {
+      userId:u.id,
+      name:cleanUserName(u.name)||'匿名玩家',
+      client,
+      label:client ? clientLabel(client) : '暂无数据',
+      os:client?.os||'',
+      osVersion:client?.osVersion||'',
+      browser:client?.browser||'',
+      browserVersion:client?.browserVersion||'',
+      deviceType:client?.deviceType||'',
+      lastSeen:u.lastSeen||''
+    };
+  }).sort((a,b)=>new Date(b.lastSeen||0)-new Date(a.lastSeen||0));
+  return {
+    identifiedUsers:users.filter(u=>u.client).length,
+    missingUsers:users.filter(u=>!u.client).length,
+    os:statRows(os),
+    browsers:statRows(browsers),
+    combos:statRows(combos),
+    devices:statRows(devices),
+    users:users.slice(0,80)
+  };
+}
+function recordingStatsByClient(events) {
+  const groups=new Map();
+  const ensure=label=>{
+    if(!groups.has(label)) groups.set(label,{client:label,recordClicks:0,recordStarted:0,micOpened:0,audioUploaded:0,transcribed:0,noText:0,errors:0,playIssues:0});
+    return groups.get(label);
+  };
+  for(const event of events) {
+    const row=ensure(clientLabel(eventClient(event)));
+    if(event.type==='record_click') row.recordClicks++;
+    if(event.type==='record_started') row.recordStarted++;
+    if(event.type==='mic_opened') row.micOpened++;
+    if(event.type==='audio_probe_uploaded') row.audioUploaded++;
+    if(event.type==='audio_only_transcribed'||event.type==='speech_recognized') row.transcribed++;
+    if(event.type==='audio_only_received'||event.type==='speech_ended_empty') row.noText++;
+    if(['mic_error','speech_error','audio_probe_upload_failed','audio_probe_error','audio_probe_empty','api_error'].includes(event.type)) row.errors++;
+    if(['audio_play_failed','audio_play_unconfirmed','record_blocked_audio_unconfirmed'].includes(event.type)) row.playIssues++;
+  }
+  return [...groups.values()]
+    .filter(row=>row.recordClicks||row.audioUploaded||row.errors||row.playIssues||row.noText)
+    .map(row=>({
+      ...row,
+      startRate:row.recordClicks?Math.round(row.recordStarted/row.recordClicks*100):0,
+      uploadRate:row.recordStarted?Math.round(row.audioUploaded/row.recordStarted*100):0,
+      transcribeRate:row.audioUploaded?Math.round(row.transcribed/row.audioUploaded*100):0
+    }))
+    .sort((a,b)=>(b.errors+b.playIssues+b.noText)-(a.errors+a.playIssues+a.noText)||b.recordClicks-a.recordClicks)
+    .slice(0,20);
+}
+function audioAnswerSummary(data) {
+  const sessions=(data.sessions||[]).filter(s=>!isTestSession(s));
+  const audioAnswers=sessions.flatMap(s=>(Array.isArray(s.audioAnswers)?s.audioAnswers:[]).map(a=>({...a,sessionId:s.id,userId:s.userId})));
+  const audioStatus=new Map(), transcriptionStatus=new Map(), mimeTypes=new Map();
+  const actualDurations=[], asrDurations=[], durationLosses=[];
+  for(const answer of audioAnswers) {
+    inc(audioStatus,answer.audioStatus||'unknown');
+    inc(transcriptionStatus,answer.transcriptionStatus||answer.status||'unknown');
+    inc(mimeTypes,answer.mimeType||'unknown');
+    if(Number(answer.actualDurationMs||0)>0) actualDurations.push(Number(answer.actualDurationMs));
+    if(Number(answer.asrDurationMs||0)>0) asrDurations.push(Number(answer.asrDurationMs));
+    if(Number(answer.durationLossMs||0)>0) durationLosses.push(Number(answer.durationLossMs));
+  }
+  return {
+    count:audioAnswers.length,
+    audioStatus:statRows(audioStatus),
+    transcriptionStatus:statRows(transcriptionStatus),
+    mimeTypes:statRows(mimeTypes),
+    actualDurationMs:{avg:avg(actualDurations),p50:percentile(actualDurations,.5),p95:percentile(actualDurations,.95)},
+    asrDurationMs:{avg:avg(asrDurations),p50:percentile(asrDurations,.5),p95:percentile(asrDurations,.95)},
+    durationLossMs:{avg:avg(durationLosses),p95:percentile(durationLosses,.95)}
+  };
+}
+function compatibilityStats(data, events) {
+  const issueTypes=new Set(['audio_play_failed','audio_play_unconfirmed','record_blocked_audio_unconfirmed','mic_error','speech_error','audio_probe_upload_failed','audio_probe_error','audio_probe_empty','audio_only_received','speech_ended_empty','api_error']);
+  const issueEvents=events.filter(e=>issueTypes.has(e.type));
+  const issueCounts=[...groupBy(issueEvents,e=>e.type)].map(([type,items])=>({type,count:items.length,latestAt:items.at(-1)?.at||''})).sort((a,b)=>b.count-a.count);
+  const monitorIssueTypes=new Set(['speech_missing','audio_incomplete','audio_health_unknown','speech_empty','transcribe_failed','audio_asr_ignored','audio_answer_rejected']);
+  const monitorEvents=(data.sessions||[]).filter(s=>!isTestSession(s)).flatMap(s=>(Array.isArray(s.monitor)?s.monitor:[]).map(e=>({...e,sessionId:s.id,userId:s.userId}))).filter(e=>monitorIssueTypes.has(e.type));
+  const monitorIssueCounts=[...groupBy(monitorEvents,e=>e.type)].map(([type,items])=>({type,count:items.length,latestAt:items.at(-1)?.at||''})).sort((a,b)=>b.count-a.count);
+  return {
+    issueEvents:issueEvents.length,
+    issueCounts,
+    monitorIssueCounts,
+    recordingByClient:recordingStatsByClient(events),
+    recentIssues:issueEvents.slice(-40).reverse(),
+    recentMonitorIssues:monitorEvents.slice(-40).reverse()
+  };
 }
 function analyticsSummary(data) {
   const events=[...(data.analyticsEvents||[])].sort((a,b)=>eventTime(a)-eventTime(b));
@@ -1649,6 +1874,9 @@ function analyticsSummary(data) {
     audioReceivedNoText:events.filter(e=>e.type==='audio_only_received'||e.type==='speech_ended_empty').length,
     errors:events.filter(e=>['mic_error','speech_error','audio_probe_upload_failed','audio_probe_error'].includes(e.type)).length
   };
+  recording.clickToStartRate=recording.recordClicks?Math.round(recording.recordStarted/recording.recordClicks*100):0;
+  recording.startToUploadRate=recording.recordStarted?Math.round(recording.audioUploaded/recording.recordStarted*100):0;
+  recording.uploadToTranscribedRate=recording.audioUploaded?Math.round(recording.transcribed/recording.audioUploaded*100):0;
   return {
     generatedAt:new Date().toISOString(),
     totalEvents:events.length,
@@ -1663,6 +1891,9 @@ function analyticsSummary(data) {
     avgLibraryMs:avg(libraryDurations),
     p95LibraryMs:percentile(libraryDurations,.95),
     recording,
+    clients:clientStats(data,events),
+    audioAnswers:audioAnswerSummary(data),
+    compatibility:compatibilityStats(data,events),
     eventCounts:byType.slice(0,40),
     pageStats,
     apiStats,
@@ -2474,7 +2705,7 @@ async function handleRequest(req,res) { try {
   }
   if(req.method==='GET'&&p==='/api/sounds') return send(res,200,data.sounds.map(publicSound));
   if(req.method==='GET'&&p==='/api/admin/sounds') return send(res,200,data.sounds.map(s=>adminSound(s,data.users)));
-  if(req.method==='GET'&&p==='/api/admin/users') return send(res,200,data.users.filter(u=>!isTestUser(u)).map(u=>userPublic(u,data.sounds,data.sessions)).sort((a,b)=>new Date(b.lastSeen)-new Date(a.lastSeen)));
+  if(req.method==='GET'&&p==='/api/admin/users') return send(res,200,data.users.filter(u=>!isTestUser(u)).map(u=>userPublicWithClient(data,u,data.sounds,data.sessions)).sort((a,b)=>new Date(b.lastSeen)-new Date(a.lastSeen)));
   const adminUserAnswersMatch=p.match(/^\/api\/admin\/users\/([^/]+)\/answers$/);
   if(req.method==='GET'&&adminUserAnswersMatch) {
     const userId=decodeURIComponent(adminUserAnswersMatch[1]);
@@ -2518,6 +2749,7 @@ async function handleRequest(req,res) { try {
   }
   if(req.method==='POST'&&p==='/api/users') {
     const x=JSON.parse((await body(req)).toString());
+    x.userAgent=x.userAgent||req.headers['user-agent']||'';
     const userGuardKey=requestKey(req,url,x,'user-upsert');
     if(!enterRequestGuard(userGuardKey,900,15000)) return sendRateLimited(res,'正在准备用户信息，请稍候',900);
     try {
@@ -2535,6 +2767,7 @@ async function handleRequest(req,res) { try {
   }
   if(req.method==='POST'&&p==='/api/game/start') {
     const x=JSON.parse((await body(req)).toString());
+    x.userAgent=x.userAgent||req.headers['user-agent']||'';
     const startRequestTest=isTestRequest(req,url,x);
     let u=getUserById(data,x.userId);
     if(!u&&x.deviceId) u=startRequestTest ? upsertTestUser(x) : upsertRealUser(data,x);
@@ -2543,6 +2776,7 @@ async function handleRequest(req,res) { try {
     if(!enterRequestGuard(startGuardKey,2200,20000)) return sendRateLimited(res,'正在进入下一轮，请稍候',1600);
     try {
     const testMode=isTestUser(u)||startRequestTest;
+    if(!testMode) applyUserClientInfo(u,x,req);
     if(!testMode) await hydrateCloudUserSidecars(data,u.id,{fallbackAll:false});
     const sessionList=sessionsFor(data,u);
     const pending=activeLibraryCompletionPending(u);

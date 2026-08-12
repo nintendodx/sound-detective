@@ -21,6 +21,33 @@ function accuracyCell(user) {
   return `<b>${accuracy}%</b><small>累计答对 ${correct} / ${total} 题</small>`;
 }
 
+function clientText(user = {}) {
+  const client = user.client || {};
+  if (user.clientLabel) return user.clientLabel;
+  const os = [client.os, client.osVersion].filter(Boolean).join(' ');
+  const browser = [client.browser, client.browserVersion].filter(Boolean).join(' ');
+  return [os, browser].filter(Boolean).join(' / ');
+}
+
+function deviceTypeLabel(type) {
+  return {
+    mobile: '手机',
+    tablet: '平板',
+    desktop: '电脑'
+  }[String(type || '')] || '';
+}
+
+function clientCell(user) {
+  const client = user.client || {};
+  const text = clientText(user);
+  if (!text) return '<span class="history-empty">暂无数据</span>';
+  const notes = [
+    deviceTypeLabel(client.deviceType),
+    client.updatedAt ? `更新 ${date(client.updatedAt)}` : ''
+  ].filter(Boolean);
+  return `<b>${esc(text)}</b>${notes.length ? `<small>${esc(notes.join(' · '))}</small>` : ''}`;
+}
+
 function inputModeLabel(mode) {
   return {
     text: '文字',
@@ -101,8 +128,9 @@ function renderAnswerHistory(payload) {
   const rounds = Array.isArray(payload.rounds) ? payload.rounds : [];
   const totalAnswers = rounds.reduce((sum, r) => sum + Number(r.answered || 0), 0);
   const totalCorrect = rounds.reduce((sum, r) => sum + Number(r.correct || 0), 0);
+  const client = clientText(payload.user || {});
   $('#answerDialogTitle').textContent = `${payload.user?.name || '用户'} 的回答记录`;
-  $('#answerDialogMeta').textContent = `共 ${rounds.length} 轮，${totalCorrect} / ${totalAnswers} 题答对`;
+  $('#answerDialogMeta').textContent = `共 ${rounds.length} 轮，${totalCorrect} / ${totalAnswers} 题答对${client ? ` · ${client}` : ''}`;
   $('#answerDialogBody').innerHTML = rounds.length
     ? rounds.map(renderRound).join('')
     : '<div class="history-empty answer-empty">这个用户还没有答题记录</div>';
@@ -144,13 +172,14 @@ async function loadUsers() {
   $('#userRows').innerHTML = users.map(u => `
     <tr>
       <td><b>${esc(u.name)}</b></td>
+      <td>${clientCell(u)}</td>
       <td>${date(u.firstSeen)}</td>
       <td>${date(u.lastSeen)}</td>
       <td>${Number(u.total || 0)} 题</td>
       <td>${accuracyCell(u)}</td>
       <td><button class="history-open user-answer-open" type="button" data-user-id="${esc(u.id)}">回答记录</button></td>
     </tr>
-  `).join('') || '<tr><td colspan="6">尚无用户数据</td></tr>';
+  `).join('') || '<tr><td colspan="7">尚无用户数据</td></tr>';
 }
 
 $('#userRows').addEventListener('click', e => {
@@ -165,5 +194,5 @@ $('#answerDialog').addEventListener('click', e => {
 });
 
 loadUsers().catch(e => {
-  $('#userRows').innerHTML = `<tr><td colspan="6">加载失败：${esc(e.message)}</td></tr>`;
+  $('#userRows').innerHTML = `<tr><td colspan="7">加载失败：${esc(e.message)}</td></tr>`;
 });

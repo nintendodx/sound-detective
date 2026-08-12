@@ -23,6 +23,8 @@ const eventLabels = {
   audio_play_request: '请求播音',
   audio_playing: '正在播音',
   audio_play_failed: '播音失败',
+  audio_play_unconfirmed: '未确认播音',
+  record_blocked_audio_unconfirmed: '播音未确认拦截录音',
   record_click: '点击回答',
   record_started: '开始录音',
   record_stop_click: '手动结束录音',
@@ -34,8 +36,15 @@ const eventLabels = {
   audio_probe_upload_failed: '上传失败',
   audio_probe_error: '录音失败',
   audio_probe_empty: '录音为空',
+  audio_incomplete: '录音不完整',
+  audio_health_unknown: '音频质量未知',
   audio_only_transcribed: '本地转写成功',
   audio_only_received: '收到音频未转写',
+  speech_missing: '未检测到人声',
+  speech_empty: 'ASR 为空',
+  transcribe_failed: 'ASR 失败',
+  audio_asr_ignored: 'ASR 结果已忽略',
+  audio_answer_rejected: '语音重复拒绝',
   speech_started: '浏览器识别启动',
   speech_recognized: '浏览器识别成功',
   speech_error: '浏览器识别失败',
@@ -91,9 +100,9 @@ function objectSummary(input) {
   return pairs.length ? pairs.join(' · ') : '-';
 }
 
-function renderRows(selector, rows, empty, render) {
+function renderRows(selector, rows, empty, render, colspan = 8) {
   const el = $(selector);
-  el.innerHTML = rows.length ? rows.map(render).join('') : `<tr><td colspan="8">${esc(empty)}</td></tr>`;
+  el.innerHTML = rows.length ? rows.map(render).join('') : `<tr><td colspan="${colspan}">${esc(empty)}</td></tr>`;
 }
 
 function renderMetrics(data) {
@@ -116,8 +125,86 @@ function renderMetrics(data) {
     metric('音频上传', number(r.audioUploaded)),
     metric('识别出文字', number(r.transcribed)),
     metric('收到但无文字', number(r.audioReceivedNoText)),
-    metric('录音/识别错误', number(r.errors))
+    metric('录音/识别错误', number(r.errors)),
+    metric('点击到开始率', `${number(r.clickToStartRate)}%`),
+    metric('开始到上传率', `${number(r.startToUploadRate)}%`),
+    metric('上传到识别率', `${number(r.uploadToTranscribedRate)}%`)
   ].join('');
+}
+
+function statPills(rows = [], labelFn = row => row.key) {
+  return rows.map(row => `
+    <span class="event-pill"><b>${esc(labelFn(row))}</b><i>${number(row.count)}</i></span>
+  `).join('') || '<span class="history-empty">暂无数据</span>';
+}
+
+function renderClientStats(data) {
+  const clients = data.clients || {};
+  const audio = data.audioAnswers || {};
+  $('#clientGrid').innerHTML = [
+    metric('已识别用户环境', number(clients.identifiedUsers), `缺少 ${number(clients.missingUsers)} 个用户`),
+    metric('后端录音记录', number(audio.count), 'audioAnswers'),
+    metric('录音时长 P50', duration(audio.actualDurationMs?.p50), `P95 ${duration(audio.actualDurationMs?.p95)}`),
+    metric('ASR 耗时 P50', duration(audio.asrDurationMs?.p50), `P95 ${duration(audio.asrDurationMs?.p95)}`)
+  ].join('');
+
+  $('#clientPills').innerHTML = [
+    statPills(clients.os || []),
+    statPills(clients.browsers || []),
+    statPills(audio.transcriptionStatus || [], row => `ASR ${row.key}`),
+    statPills(audio.audioStatus || [], row => `音频 ${row.key}`)
+  ].join('');
+
+  renderRows('#clientRows', clients.users || [], '暂无用户环境数据', row => `
+    <tr>
+      <td><b>${esc(row.name || '匿名玩家')}</b><small>${esc(row.userId || '')}</small></td>
+      <td>${esc([row.os, row.osVersion].filter(Boolean).join(' ') || '-')}</td>
+      <td>${esc([row.browser, row.browserVersion].filter(Boolean).join(' ') || '-')}</td>
+      <td>${esc(row.deviceType || '-')}</td>
+      <td>${date(row.lastSeen)}</td>
+    </tr>
+  `, 5);
+}
+
+function renderCompatibility(data) {
+  const compatibility = data.compatibility || {};
+  const issues = [
+    ...(compatibility.issueCounts || []).map(row => ({ ...row, source: '前端' })),
+    ...(compatibility.monitorIssueCounts || []).map(row => ({ ...row, source: '后端' }))
+  ].sort((a, b) => b.count - a.count || date(b.latestAt).localeCompare(date(a.latestAt)));
+  const clientRows = compatibility.recordingByClient || [];
+  const totals = clientRows.reduce((acc, row) => {
+    acc.noText += Number(row.noText || 0);
+    acc.errors += Number(row.errors || 0);
+    acc.playIssues += Number(row.playIssues || 0);
+    return acc;
+  }, { noText: 0, errors: 0, playIssues: 0 });
+  $('#issueGrid').innerHTML = [
+    metric('问题事件', number(compatibility.issueEvents)),
+    metric('无文字结果', number(totals.noText)),
+    metric('录音/接口错误', number(totals.errors)),
+    metric('播放确认问题', number(totals.playIssues))
+  ].join('');
+
+  renderRows('#issueRows', issues, '暂无语音链路问题', row => `
+    <tr>
+      <td><b>${esc(eventName(row.type))}</b><small>${esc(row.source)} · ${esc(row.type)}</small></td>
+      <td>${number(row.count)}</td>
+      <td>${date(row.latestAt)}</td>
+    </tr>
+  `, 3);
+
+  renderRows('#clientRecordingRows', clientRows, '暂无按客户端拆分的录音数据', row => `
+    <tr>
+      <td><b>${esc(row.client)}</b></td>
+      <td>${number(row.recordClicks)}</td>
+      <td>${number(row.startRate)}%</td>
+      <td>${number(row.uploadRate)}%</td>
+      <td>${number(row.transcribeRate)}%</td>
+      <td>${number(row.noText)}</td>
+      <td>${number(Number(row.errors || 0) + Number(row.playIssues || 0))}</td>
+    </tr>
+  `, 7);
 }
 
 function renderTables(data) {
@@ -129,7 +216,7 @@ function renderTables(data) {
       <td>${duration(row.p95DurationMs)}</td>
       <td>${duration(row.maxDurationMs)}</td>
     </tr>
-  `);
+  `, 5);
 
   renderRows('#apiRows', data.apiStats || [], '暂无接口数据', row => `
     <tr>
@@ -140,7 +227,7 @@ function renderTables(data) {
       <td>${duration(row.p95Ms)}</td>
       <td>${date(row.latestAt)}</td>
     </tr>
-  `);
+  `, 6);
 
   $('#eventCounts').innerHTML = (data.eventCounts || []).map(item => `
     <span class="event-pill"><b>${esc(eventName(item.type))}</b><i>${number(item.count)}</i></span>
@@ -154,7 +241,7 @@ function renderTables(data) {
       <td>${esc(row.page || row.path || '-')}</td>
       <td><small>${esc(objectSummary(row.details))}</small></td>
     </tr>
-  `);
+  `, 5);
 }
 
 async function loadAnalytics() {
@@ -174,6 +261,8 @@ async function loadAnalytics() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '读取失败');
     renderMetrics(data);
+    renderClientStats(data);
+    renderCompatibility(data);
     renderTables(data);
     status.textContent = `更新于 ${date(data.generatedAt)}`;
   } catch (e) {
