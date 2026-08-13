@@ -1,6 +1,6 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const APP_VERSION = '0.1073-20260812';
+const APP_VERSION = '0.1074-20260813';
 const TEST_MODE = (() => {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -14,6 +14,13 @@ const DEVICE_COOKIE_NAME = 'voiceDetectiveDeviceId';
 const USER_COOKIE_NAME = 'voiceDetectiveUserId';
 const NAME_COOKIE_NAME = 'voiceDetectiveName';
 const CHANGELOG = [
+  {
+    version: '0.1074-20260813',
+    items: [
+      '修复文字作答后，上一题答案被恢复到下一题的问题。',
+      '后台回答记录会用同题真实提交修正已知的错误恢复记录。'
+    ]
+  },
   {
     version: '0.1073-20260812',
     items: [

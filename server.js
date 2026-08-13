@@ -481,6 +481,23 @@ function syncStoredUserTotals(data) {
   }
   return changed;
 }
+function syncStoredUserAnswers(data) {
+  let changed=false;
+  const sessions=Array.isArray(data.sessions)?data.sessions:[];
+  for(const user of data.users||[]) {
+    if(!user||isTestUser(user)) continue;
+    const ids=[...new Set(sessions
+      .filter(session=>session&&session.userId===user.id&&!isTestSession(session))
+      .flatMap(session=>Array.isArray(session.answers)?session.answers:[])
+      .map(answer=>answer&&answer.soundId)
+      .filter(Boolean))];
+    if(JSON.stringify(user.answers||[])!==JSON.stringify(ids)) {
+      user.answers=ids;
+      changed=true;
+    }
+  }
+  return changed;
+}
 function getUserById(data, id) {
   return data.users.find(u=>u.id===id)||TEST_USERS.get(id)||null;
 }
@@ -583,6 +600,21 @@ function refreshAnswerTextStats(sound) {
   sound.answerTextStats=next;
   return changed;
 }
+function syncSoundAnswerTotals(sound) {
+  const history=Array.isArray(sound.answerHistory)?sound.answerHistory:[];
+  const plays=history.length;
+  const correct=history.filter(h=>h&&h.correct).length;
+  let changed=false;
+  if(Number(sound.plays||0)!==plays) {
+    sound.plays=plays;
+    changed=true;
+  }
+  if(Number(sound.correct||0)!==correct) {
+    sound.correct=correct;
+    changed=true;
+  }
+  return changed;
+}
 function appendSoundAnswerHistory(sound, session, answer) {
   if(!sound) return false;
   const rec=answerHistoryRecord(sound.id,session,answer);
@@ -598,9 +630,24 @@ function normalizeAnswerHistory(data) {
   let changed=false;
   const sounds=Array.isArray(data.sounds)?data.sounds:[];
   const byId=new Map(sounds.map(s=>[s.id,s]));
+  const sessionKeysBySound=new Map();
+  const sessionIds=new Set();
+  for(const session of Array.isArray(data.sessions)?data.sessions:[]) {
+    if(session?.id) sessionIds.add(session.id);
+    for(const answer of Array.isArray(session.answers)?session.answers:[]) {
+      const sound=byId.get(answer.soundId);
+      if(!sound) continue;
+      const rec=answerHistoryRecord(sound.id,session,answer);
+      if(!rec) continue;
+      const key=answerHistoryKey(sound.id,rec.sessionId,rec.at,rec.answer);
+      if(!sessionKeysBySound.has(sound.id)) sessionKeysBySound.set(sound.id,new Set());
+      sessionKeysBySound.get(sound.id).add(key);
+    }
+  }
   const seenBySound=new Map();
   for(const sound of sounds) {
     const clean=[], seen=new Set();
+    const validSessionKeys=sessionKeysBySound.get(sound.id)||new Set();
     for(const raw of Array.isArray(sound.answerHistory)?sound.answerHistory:[]) {
       const answer=String(raw?.answer||'').trim();
       if(!answer) { changed=true; continue; }
@@ -615,6 +662,7 @@ function normalizeAnswerHistory(data) {
         at
       };
       const key=answerHistoryKey(sound.id,rec.sessionId,rec.at,rec.answer);
+      if(rec.sessionId&&sessionIds.has(rec.sessionId)&&!validSessionKeys.has(key)) { changed=true; continue; }
       if(seen.has(key)) { changed=true; continue; }
       seen.add(key);
       clean.push(rec);
@@ -640,7 +688,133 @@ function normalizeAnswerHistory(data) {
   }
   for(const sound of sounds) {
     if(refreshAnswerTextStats(sound)) changed=true;
+    if(syncSoundAnswerTotals(sound)) changed=true;
   }
+  return changed;
+}
+function cleanRecoveredAnswer(value) {
+  return String(value||'').trim().replace(/\s+/g,' ');
+}
+function monitorDetails(event) {
+  return event?.details&&typeof event.details==='object' ? event.details : {};
+}
+function monitorEventKey(event) {
+  return String(event?.id||[event?.at||'',event?.type||'',event?.details?.answer||''].join('|'));
+}
+function buildMonitorAnswerContext(session) {
+  const validSoundIds=new Set(session.soundIds||[]);
+  const events=[...(Array.isArray(session.monitor)?session.monitor:[])].sort((a,b)=>new Date(a.at||0)-new Date(b.at||0));
+  const responses=new Map();
+  const submissions=[];
+  let currentSoundId='';
+  let lastSubmission=null;
+  for(const event of events) {
+    const details=monitorDetails(event);
+    if(details.soundId&&validSoundIds.has(details.soundId)) currentSoundId=details.soundId;
+    if(event.type==='question_rendered'&&details.soundId&&validSoundIds.has(details.soundId)) currentSoundId=details.soundId;
+    if(event.type==='answer_submit'&&details.answer) {
+      const soundId=validSoundIds.has(details.soundId) ? details.soundId : currentSoundId;
+      const submission={
+        event,
+        soundId,
+        answer:details.answer,
+        cleanAnswer:cleanRecoveredAnswer(details.answer),
+        inputMode:details.inputMode||'text',
+        at:event.at||''
+      };
+      if(soundId) submissions.push(submission);
+      lastSubmission=submission;
+    }
+    if(event.type==='answer_response'&&details.recorded&&details.answer) {
+      const responseAnswer=cleanRecoveredAnswer(details.answer);
+      let soundId=validSoundIds.has(details.soundId) ? details.soundId : '';
+      if(!soundId&&lastSubmission&&lastSubmission.cleanAnswer===responseAnswer) soundId=lastSubmission.soundId;
+      responses.set(monitorEventKey(event),{
+        event,
+        soundId,
+        answer:details.answer,
+        cleanAnswer:responseAnswer,
+        inputMode:details.inputMode||lastSubmission?.inputMode||'text',
+        at:event.at||''
+      });
+      lastSubmission=null;
+    }
+  }
+  return {events,responses,submissions,validSoundIds};
+}
+function repairRecoveredAnswerDrift(data, session) {
+  if(!session||!Array.isArray(session.answers)||!Array.isArray(session.monitor)||!Array.isArray(session.soundIds)) return false;
+  const soundsById=new Map((data.sounds||[]).map(s=>[s.id,s]));
+  const {responses,submissions,validSoundIds}=buildMonitorAnswerContext(session);
+  let changed=false;
+  const repairedNow=new Date().toISOString();
+  const nextAnswers=[];
+  for(const answer of session.answers) {
+    let keepAnswer=true;
+    if(!answer?.recovered||!answer.recoveredFromEventId||!validSoundIds.has(answer.soundId)) {
+      nextAnswers.push(answer);
+      continue;
+    }
+    const response=responses.get(String(answer.recoveredFromEventId));
+    const cleanAnswer=cleanRecoveredAnswer(answer.answer);
+    const drifted=response&&response.soundId&&response.soundId!==answer.soundId&&response.cleanAnswer===cleanAnswer;
+    if(!drifted) {
+      nextAnswers.push(answer);
+      continue;
+    }
+    const recoveredAt=eventTime({at:answer.at});
+    const actual=submissions.find(item =>
+      item.soundId===answer.soundId &&
+      item.cleanAnswer &&
+      eventTime(item.event)>=recoveredAt-1000 &&
+      eventTime(item.event)<=recoveredAt+30*60*1000
+    );
+    if(!actual) {
+      const tombstone={
+        soundId:answer.soundId,
+        removed:true,
+        at:repairedNow,
+        repairedFromRecovery:true,
+        repairedFromEventId:String(answer.recoveredFromEventId),
+        repairedFromSoundId:String(response.soundId||'')
+      };
+      appendMonitor(session,'server','answer_recovery_removed','已移除错误恢复到本题的答题记录',{
+        soundId:answer.soundId,
+        fromSoundId:response.soundId,
+        eventId:response.event?.id||''
+      });
+      if(!isTestSession(session)) queueCloudAnswerSidecar(session,tombstone);
+      keepAnswer=false;
+      changed=true;
+    } else {
+      const sound=soundsById.get(answer.soundId);
+      if(!sound) {
+        nextAnswers.push(answer);
+        continue;
+      }
+      const result=judgeAnswer(sound,actual.answer);
+      answer.answer=String(actual.answer||'').trim().slice(0,500);
+      answer.correct=result.correct;
+      answer.at=actual.at||answer.at;
+      answer.inputMode=actual.inputMode||'text';
+      answer.repairedFromRecovery=true;
+      answer.repairedAt=repairedNow;
+      answer.repairedFromEventId=String(answer.recoveredFromEventId);
+      answer.repairedFromSoundId=String(response.soundId||'');
+      delete answer.recovered;
+      delete answer.recoveredFromEventId;
+      appendMonitor(session,'server','answer_recovery_repaired','已用同题文字提交修正错误恢复的答题记录',{
+        soundId:answer.soundId,
+        fromSoundId:response.soundId,
+        eventId:response.event?.id||'',
+        answer:answer.answer.slice(0,80)
+      });
+      if(!isTestSession(session)) queueCloudAnswerSidecar(session,answer);
+      changed=true;
+    }
+    if(keepAnswer) nextAnswers.push(answer);
+  }
+  if(changed) session.answers=nextAnswers;
   return changed;
 }
 function recoverAnswersFromMonitor(data, session) {
@@ -649,25 +823,12 @@ function recoverAnswersFromMonitor(data, session) {
   const answered=new Set(session.answers.map(a=>a&&a.soundId).filter(Boolean));
   const usedRecoveryEvents=new Set(session.answers.map(a=>a&&a.recoveredFromEventId).filter(Boolean));
   const soundsById=new Map((data.sounds||[]).map(s=>[s.id,s]));
-  const validSoundIds=new Set(session.soundIds||[]);
-  const events=[...session.monitor].sort((a,b)=>new Date(a.at||0)-new Date(b.at||0));
-  let currentSoundId='';
-  let lastSubmission=null;
+  const {events,responses,validSoundIds}=buildMonitorAnswerContext(session);
   let changed=false;
-  const nextUnansweredAfter = soundId => {
-    const list=session.soundIds||[];
-    const start=Math.max(0,list.indexOf(soundId));
-    for(let offset=1; offset<=list.length; offset++) {
-      const candidate=list[(start+offset)%list.length];
-      if(candidate&&!answered.has(candidate)) return candidate;
-    }
-    return '';
-  };
   const recover=(soundId, answer, event, inputMode='text') => {
-    const eventKey=String(event?.id||[event?.at||'',event?.type||'',event?.details?.answer||''].join('|'));
+    const eventKey=monitorEventKey(event);
     if(eventKey&&usedRecoveryEvents.has(eventKey)) return false;
-    let cleanSoundId=String(soundId||'');
-    if(cleanSoundId&&answered.has(cleanSoundId)) cleanSoundId=nextUnansweredAfter(cleanSoundId);
+    const cleanSoundId=String(soundId||'');
     const text=String(answer||'').trim();
     if(!cleanSoundId||!text||answered.has(cleanSoundId)||!validSoundIds.has(cleanSoundId)) return false;
     const sound=soundsById.get(cleanSoundId);
@@ -685,22 +846,10 @@ function recoverAnswersFromMonitor(data, session) {
     return true;
   };
   for(const event of events) {
-    const details=event?.details&&typeof event.details==='object' ? event.details : {};
-    if(details.soundId&&validSoundIds.has(details.soundId)) currentSoundId=details.soundId;
-    if(event.type==='question_rendered'&&details.soundId) currentSoundId=details.soundId;
-    if(event.type==='answer_submit'&&details.answer) {
-      lastSubmission={
-        soundId:details.soundId||currentSoundId,
-        answer:details.answer,
-        inputMode:details.inputMode||'text',
-        at:event.at
-      };
-    }
+    const details=monitorDetails(event);
     if(event.type==='answer_response'&&details.recorded&&details.answer) {
-      const soundId=details.soundId||lastSubmission?.soundId||currentSoundId;
-      const inputMode=details.inputMode||lastSubmission?.inputMode||'text';
-      if(recover(soundId,details.answer,event,inputMode)) changed=true;
-      lastSubmission=null;
+      const response=responses.get(monitorEventKey(event));
+      if(recover(response?.soundId||'',response?.answer||'',event,response?.inputMode||'text')) changed=true;
     }
   }
   return changed;
@@ -754,11 +903,13 @@ function normalizeStoreState(data) {
     }
   }
   for(const session of data.sessions) {
+    if(repairRecoveredAnswerDrift(data,session)) changed=true;
     if(recoverAnswersFromMonitor(data,session)) changed=true;
   }
   for(const user of data.users) {
     if(normalizeUserProgressState(data,user)) changed=true;
   }
+  if(syncStoredUserAnswers(data)) changed=true;
   if(syncStoredUserTotals(data)) changed=true;
   if(data.analyticsEvents.length>ANALYTICS_MAX_EVENTS) {
     data.analyticsEvents=data.analyticsEvents.slice(-ANALYTICS_MAX_EVENTS);
@@ -814,7 +965,7 @@ function mergeAnswers(a=[], b=[]) {
     const prev=map.get(key);
     if(!prev||new Date(answer.at||0)>=new Date(prev.at||0)) map.set(key,{...prev,...answer});
   }
-  return [...map.values()].sort((x,y)=>new Date(x.at||0)-new Date(y.at||0));
+  return [...map.values()].filter(answer=>!answer.removed).sort((x,y)=>new Date(x.at||0)-new Date(y.at||0));
 }
 function mergeAudioAnswers(a=[], b=[]) {
   const map=new Map();
