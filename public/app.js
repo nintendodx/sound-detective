@@ -1,6 +1,6 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const APP_VERSION = '0.1074-20260813';
+const APP_VERSION = '0.1075-20260813';
 const TEST_MODE = (() => {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -14,6 +14,13 @@ const DEVICE_COOKIE_NAME = 'voiceDetectiveDeviceId';
 const USER_COOKIE_NAME = 'voiceDetectiveUserId';
 const NAME_COOKIE_NAME = 'voiceDetectiveName';
 const CHANGELOG = [
+  {
+    version: '0.1075-20260813',
+    items: [
+      '修复掌声等短答案被误删“声”字后判错的问题。',
+      '云端会重新计算历史答案，并隐藏没有作答证据的空轮记录。'
+    ]
+  },
   {
     version: '0.1074-20260813',
     items: [

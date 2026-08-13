@@ -728,19 +728,59 @@ function buildMonitorAnswerContext(session) {
     if(event.type==='answer_response'&&details.recorded&&details.answer) {
       const responseAnswer=cleanRecoveredAnswer(details.answer);
       let soundId=validSoundIds.has(details.soundId) ? details.soundId : '';
-      if(!soundId&&lastSubmission&&lastSubmission.cleanAnswer===responseAnswer) soundId=lastSubmission.soundId;
+      const matchedSubmission=Boolean(lastSubmission&&lastSubmission.cleanAnswer===responseAnswer&&(!soundId||lastSubmission.soundId===soundId));
+      if(!soundId&&matchedSubmission) soundId=lastSubmission.soundId;
       responses.set(monitorEventKey(event),{
         event,
         soundId,
         answer:details.answer,
         cleanAnswer:responseAnswer,
         inputMode:details.inputMode||lastSubmission?.inputMode||'text',
-        at:event.at||''
+        at:event.at||'',
+        matchedSubmission
       });
       lastSubmission=null;
     }
   }
   return {events,responses,submissions,validSoundIds};
+}
+function repairTextAnswersFromSubmissions(data, session) {
+  if(!session||!Array.isArray(session.answers)||!Array.isArray(session.monitor)||!Array.isArray(session.soundIds)) return false;
+  const soundsById=new Map((data.sounds||[]).map(s=>[s.id,s]));
+  const {submissions,validSoundIds}=buildMonitorAnswerContext(session);
+  if(!submissions.length) return false;
+  let changed=false;
+  const repairedNow=new Date().toISOString();
+  for(const answer of session.answers) {
+    if(!answer||answer.removed||answer.audioAnswerId||answer.inputMode==='voice'||!validSoundIds.has(answer.soundId)) continue;
+    const actual=[...submissions].reverse().find(item=>item.soundId===answer.soundId&&item.cleanAnswer);
+    if(!actual) continue;
+    const current=cleanRecoveredAnswer(answer.answer);
+    if(actual.cleanAnswer===current) continue;
+    const sound=soundsById.get(answer.soundId);
+    if(!sound) continue;
+    const previousAnswer=answer.answer||'';
+    const previousCorrect=Boolean(answer.correct);
+    const result=judgeAnswer(sound,actual.answer);
+    answer.answer=String(actual.answer||'').trim().slice(0,500);
+    answer.correct=result.correct;
+    answer.at=actual.at||answer.at;
+    answer.inputMode=actual.inputMode||answer.inputMode||'text';
+    answer.repairedFromSubmit=true;
+    answer.repairedAt=repairedNow;
+    answer.repairedPreviousAnswer=String(previousAnswer).slice(0,120);
+    answer.repairedPreviousCorrect=previousCorrect;
+    delete answer.recovered;
+    delete answer.recoveredFromEventId;
+    appendMonitor(session,'server','answer_submit_repaired','已用同题提交文本修正答题记录',{
+      soundId:answer.soundId,
+      answer:answer.answer.slice(0,80),
+      previousAnswer:String(previousAnswer).slice(0,80)
+    });
+    if(!isTestSession(session)) queueCloudAnswerSidecar(session,answer);
+    changed=true;
+  }
+  return changed;
 }
 function repairRecoveredAnswerDrift(data, session) {
   if(!session||!Array.isArray(session.answers)||!Array.isArray(session.monitor)||!Array.isArray(session.soundIds)) return false;
@@ -757,8 +797,9 @@ function repairRecoveredAnswerDrift(data, session) {
     }
     const response=responses.get(String(answer.recoveredFromEventId));
     const cleanAnswer=cleanRecoveredAnswer(answer.answer);
+    const invalidRecovery=!response||!response.matchedSubmission;
     const drifted=response&&response.soundId&&response.soundId!==answer.soundId&&response.cleanAnswer===cleanAnswer;
-    if(!drifted) {
+    if(!drifted&&!invalidRecovery) {
       nextAnswers.push(answer);
       continue;
     }
@@ -774,14 +815,15 @@ function repairRecoveredAnswerDrift(data, session) {
         soundId:answer.soundId,
         removed:true,
         at:repairedNow,
+        updatedAt:repairedNow,
         repairedFromRecovery:true,
         repairedFromEventId:String(answer.recoveredFromEventId),
-        repairedFromSoundId:String(response.soundId||'')
+        repairedFromSoundId:String(response?.soundId||'')
       };
       appendMonitor(session,'server','answer_recovery_removed','已移除错误恢复到本题的答题记录',{
         soundId:answer.soundId,
-        fromSoundId:response.soundId,
-        eventId:response.event?.id||''
+        fromSoundId:response?.soundId||'',
+        eventId:response?.event?.id||''
       });
       if(!isTestSession(session)) queueCloudAnswerSidecar(session,tombstone);
       keepAnswer=false;
@@ -800,13 +842,13 @@ function repairRecoveredAnswerDrift(data, session) {
       answer.repairedFromRecovery=true;
       answer.repairedAt=repairedNow;
       answer.repairedFromEventId=String(answer.recoveredFromEventId);
-      answer.repairedFromSoundId=String(response.soundId||'');
+      answer.repairedFromSoundId=String(response?.soundId||'');
       delete answer.recovered;
       delete answer.recoveredFromEventId;
       appendMonitor(session,'server','answer_recovery_repaired','已用同题文字提交修正错误恢复的答题记录',{
         soundId:answer.soundId,
-        fromSoundId:response.soundId,
-        eventId:response.event?.id||'',
+        fromSoundId:response?.soundId||'',
+        eventId:response?.event?.id||'',
         answer:answer.answer.slice(0,80)
       });
       if(!isTestSession(session)) queueCloudAnswerSidecar(session,answer);
@@ -815,6 +857,32 @@ function repairRecoveredAnswerDrift(data, session) {
     if(keepAnswer) nextAnswers.push(answer);
   }
   if(changed) session.answers=nextAnswers;
+  return changed;
+}
+function rejudgeStoredAnswers(data) {
+  let changed=false;
+  const soundsById=new Map((data.sounds||[]).map(s=>[s.id,s]));
+  const now=new Date().toISOString();
+  for(const session of data.sessions||[]) {
+    if(!session||isTestSession(session)||!Array.isArray(session.answers)) continue;
+    for(const answer of session.answers) {
+      if(!answer||answer.removed||!String(answer.answer||'').trim()) continue;
+      const sound=soundsById.get(answer.soundId);
+      if(!sound) continue;
+      const result=judgeAnswer(sound,answer.answer);
+      if(Boolean(answer.correct)===Boolean(result.correct)) continue;
+      answer.rejudgedAt=now;
+      answer.rejudgedPreviousCorrect=Boolean(answer.correct);
+      answer.correct=Boolean(result.correct);
+      appendMonitor(session,'server','answer_rejudged','已按当前题目标签重新计算答题结果',{
+        soundId:answer.soundId,
+        answer:String(answer.answer||'').slice(0,80),
+        correct:answer.correct
+      });
+      queueCloudAnswerSidecar(session,answer);
+      changed=true;
+    }
+  }
   return changed;
 }
 function recoverAnswersFromMonitor(data, session) {
@@ -849,6 +917,7 @@ function recoverAnswersFromMonitor(data, session) {
     const details=monitorDetails(event);
     if(event.type==='answer_response'&&details.recorded&&details.answer) {
       const response=responses.get(monitorEventKey(event));
+      if(!response?.matchedSubmission) continue;
       if(recover(response?.soundId||'',response?.answer||'',event,response?.inputMode||'text')) changed=true;
     }
   }
@@ -903,9 +972,11 @@ function normalizeStoreState(data) {
     }
   }
   for(const session of data.sessions) {
+    if(repairTextAnswersFromSubmissions(data,session)) changed=true;
     if(repairRecoveredAnswerDrift(data,session)) changed=true;
     if(recoverAnswersFromMonitor(data,session)) changed=true;
   }
+  if(rejudgeStoredAnswers(data)) changed=true;
   for(const user of data.users) {
     if(normalizeUserProgressState(data,user)) changed=true;
   }
@@ -945,6 +1016,10 @@ function maxIso(a,b) {
   if(!b) return a||'';
   return new Date(a) >= new Date(b) ? a : b;
 }
+function answerRevisionTime(answer={}) {
+  const t=new Date(answer.updatedAt||answer.rejudgedAt||answer.repairedAt||answer.at||0).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
 function byIdMerge(base=[], incoming=[], mergeItem=(a,b)=>({...a,...b})) {
   const out=[], map=new Map();
   for(const item of Array.isArray(base)?base:[]) {
@@ -963,7 +1038,7 @@ function mergeAnswers(a=[], b=[]) {
     if(!answer) continue;
     const key=answer.soundId||[answer.at,answer.answer].join('|');
     const prev=map.get(key);
-    if(!prev||new Date(answer.at||0)>=new Date(prev.at||0)) map.set(key,{...prev,...answer});
+    if(!prev||answerRevisionTime(answer)>=answerRevisionTime(prev)) map.set(key,{...prev,...answer});
   }
   return [...map.values()].filter(answer=>!answer.removed).sort((x,y)=>new Date(x.at||0)-new Date(y.at||0));
 }
@@ -1160,7 +1235,7 @@ const SEMANTIC_INTENTS = {
 const FILLER_PATTERNS = [
   '这是','这个是','应该是','可能是','好像是','听起来像','我觉得','感觉是','就是',
   '有点像','像是','大概是','应该就是','一个','一种','有人在','有人','正在',
-  '发出来的','发出的','传来的','的声音','这个声音','声音','声','音效','里面','外面'
+  '发出来的','发出的','传来的','的声音','这个声音','声音','音效','里面','外面'
 ];
 function normalize(s='') {
   return String(s||'').toLowerCase()
@@ -1472,9 +1547,16 @@ function adminAnswerRecord(soundId, sound, answer, index) {
     statusLabel:answerStatusLabel(answer)
   };
 }
+function hasAnswerEvidence(session) {
+  if((Array.isArray(session?.answers)?session.answers:[]).some(answer=>answer&&!answer.removed)) return true;
+  if((Array.isArray(session?.audioAnswers)?session.audioAnswers:[]).length) return true;
+  return (Array.isArray(session?.monitor)?session.monitor:[]).some(event =>
+    ['answer_submit','audio_received','audio_asr_queued','speech_transcribed','speech_empty','transcribe_failed'].includes(event?.type)
+  );
+}
 function adminUserAnswerHistory(data, u) {
   const sessionList=sessionsFor(data,u)
-    .filter(s=>s&&s.userId===u.id&&!isTestSession(s)&&Array.isArray(s.soundIds)&&s.soundIds.length)
+    .filter(s=>s&&s.userId===u.id&&!isTestSession(s)&&Array.isArray(s.soundIds)&&s.soundIds.length&&hasAnswerEvidence(s))
     .sort((a,b)=>new Date(a.startedAt||0)-new Date(b.startedAt||0));
   const soundsById=new Map((data.sounds||[]).map(s=>[s.id,s]));
   const rounds=sessionList.map((session,roundIndex)=>{
