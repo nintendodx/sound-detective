@@ -24,5 +24,6 @@
     "public/admin-users.js",
     "public/admin-tags.js",
     "public/admin-analytics.js",
-    "public/admin.css"
+    "public/admin.css",
+    "data/engineering-stats.json"
   ]

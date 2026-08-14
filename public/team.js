@@ -25,18 +25,21 @@ async function loadModelStats() {
   if (!list) return;
   try {
     const [models, stats] = await Promise.all([fetchJson('/api/team-models'), fetchJson('/api/team-stats')]);
-    const tokenText = stats.totalTokens ? `${Number(stats.totalTokens).toLocaleString('zh-CN')} tokens` : '暂时无法读取';
-    const tokenMeta = stats.totalTokens
-      ? `Codex 项目协作累计 · ${Number(stats.sessionCount || 0)} 个相关线程 · 更新于 ${new Date(stats.updatedAt).toLocaleString('zh-CN')}`
-      : '未找到可用的 Codex 会话 token 统计';
+    const codeLines = Number(stats.codeLines || stats.sourceLines || 0);
+    const fileCount = Number(stats.fileCount || 0);
+    const updatedAt = stats.updatedAt ? new Date(stats.updatedAt).toLocaleString('zh-CN') : '刚刚';
+    const codeText = codeLines ? `${codeLines.toLocaleString('zh-CN')} 行代码` : '暂时无法读取';
+    const codeMeta = codeLines
+      ? `${fileCount.toLocaleString('zh-CN')} 个工程文件 · ${stats.excludes || '不含声音素材、图片素材、题库数据和依赖包'} · 更新于 ${updatedAt}`
+      : '统计不含声音素材、图片素材、题库数据和依赖包';
     const asrCount = Number(stats.asrTranscriptionCount || 0);
     const rows = [
       ...(Array.isArray(models.items) ? models.items.slice(0, 1) : []),
       {
-        stage: '项目消耗',
-        model: 'Codex Token 消耗',
-        version: tokenText,
-        usage: tokenMeta
+        stage: '工程量统计',
+        model: '代码规模',
+        version: codeText,
+        usage: codeMeta
       },
       {
         stage: '语音识别统计',

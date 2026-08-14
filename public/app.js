@@ -1,6 +1,6 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const APP_VERSION = '0.1076-20260814';
+const APP_VERSION = '0.1079-20260814';
 const TEST_MODE = (() => {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -14,6 +14,27 @@ const DEVICE_COOKIE_NAME = 'voiceDetectiveDeviceId';
 const USER_COOKIE_NAME = 'voiceDetectiveUserId';
 const NAME_COOKIE_NAME = 'voiceDetectiveName';
 const CHANGELOG = [
+  {
+    version: '0.1079-20260814',
+    items: [
+      '排行榜改为按累计答对题数计分排序。',
+      '结算页、排名弹窗和过往成绩不再展示答题正确率。'
+    ]
+  },
+  {
+    version: '0.1078-20260814',
+    items: [
+      '首页在过往成绩下方新增查看排名。',
+      '排名弹窗延续结算页排行榜样式。'
+    ]
+  },
+  {
+    version: '0.1077-20260814',
+    items: [
+      'Credits 页把项目消耗改为代码规模。',
+      '工程量统计按源码行数和工程文件数展示，不再读取 Codex 会话日志。'
+    ]
+  },
   {
     version: '0.1076-20260814',
     items: [
@@ -112,7 +133,7 @@ const CHANGELOG = [
     version: '0.1063-20260810',
     items: [
       'Credits 页去掉顶部品牌字，制作团队标题改为 staff。',
-      'Token 消耗移入模型与算法，并新增累计识别语音统计。',
+      '代码规模移入模型与算法，并新增累计识别语音统计。',
       '过往成绩弹窗标题改为“你的游玩记录”。'
     ]
   },
@@ -377,9 +398,9 @@ const CHANGELOG = [
   {
     version: '0.1029-20260806',
     items: [
-      '制作团队页的 Token 消耗改为 Codex 项目协作累计。',
-      '统计来源改为本机 Codex 会话 token 日志。',
-      '不再用源码字符数估算 token。'
+      '制作团队页的工程量统计改为代码规模。',
+      '统计来源改为项目源码文件。',
+      '不再使用粗略估算。'
     ]
   },
   {
@@ -1026,12 +1047,17 @@ function resultImageUrl(file) {
   return `/images/${encodeURIComponent(file)}`;
 }
 
-function resultProfileForAccuracy(accuracy) {
-  const value = Number(accuracy) || 0;
-  if (value >= 100) return RESULT_PROFILES.perfect;
-  if (value >= 60) return RESULT_PROFILES.good;
-  if (value >= 20) return RESULT_PROFILES.low;
+function resultProfileForScore(score, total = 5) {
+  const value = Number(score) || 0;
+  const fullScore = Math.max(1, Number(total) || 5);
+  if (value >= fullScore) return RESULT_PROFILES.perfect;
+  if (value >= 3) return RESULT_PROFILES.good;
+  if (value >= 1) return RESULT_PROFILES.low;
   return RESULT_PROFILES.zero;
+}
+
+function scoreValue(item = {}) {
+  return Number(item.score ?? item.correct ?? 0) || 0;
 }
 
 function renderResultProfile(prefix, profile) {
@@ -1065,16 +1091,16 @@ function renderRanking(selector, ranking = [], options = {}) {
   const currentId = currentUser.id || '';
   const limit = Number(options.limit || 5) || 5;
   const source = Array.isArray(ranking) ? ranking : [];
-  const rows = source.slice(0, limit).map((x, i) => ({ ...x, displayRank: i + 1 }));
+  const rows = source.slice(0, limit).map((x, i) => ({ ...x, displayRank: Number(x.rank || 0) || i + 1 }));
   if (currentId && !rows.some(x => x.id === currentId)) {
     const currentRank = source.find(x => x.id === currentId) || currentUser;
-    if (currentRank && (currentRank.id || currentRank.name)) rows.push({ ...currentRank, displayRank: limit + 1 });
+    if (currentRank && (currentRank.id || currentRank.name)) rows.push({ ...currentRank, displayRank: Number(currentRank.rank || 0) || limit + 1 });
   }
   el.innerHTML = rows.map((x, i) => {
     const isCurrent = currentId && x.id === currentId;
     const rank = x.displayRank || i + 1;
     const badge = isCurrent ? '<small class="current-badge">你</small>' : '';
-    return `<div class="rank-row ${isCurrent ? 'current' : ''}"><b>${rank}</b><div><b>${escapeHtml(x.name || '匿名玩家')}${badge}</b><br><span>已玩 ${Number(x.total || 0)} 题</span></div><b>${Number(x.accuracy || 0)}%</b></div>`;
+    return `<div class="rank-row ${isCurrent ? 'current' : ''}"><b>${rank}</b><div><b>${escapeHtml(x.name || '匿名玩家')}${badge}</b><br><span>已玩 ${Number(x.total || 0)} 题</span></div><b>${scoreValue(x)} 分</b></div>`;
   }).join('') || '<p class="empty-note">还没有完成 1 轮的玩家</p>';
 }
 
@@ -1093,7 +1119,7 @@ function renderCompleteRanking(selector, ranking = [], currentUser = user || {})
     const badge = isCurrent ? '<small class="current-badge">你</small>' : '';
     const completedAt = x.shownAt || x.completedAt || '';
     const timeText = completedAt ? `${escapeHtml(historyTime(completedAt))} 完成` : '已完成全部挑战';
-    return `<div class="rank-row ${isCurrent ? 'current' : ''}"><b>${i + 1}</b><div><b>${escapeHtml(x.name || '匿名玩家')}${badge}</b><br><span>${timeText}</span></div><b>${Number(x.accuracy || 0)}%</b></div>`;
+    return `<div class="rank-row ${isCurrent ? 'current' : ''}"><b>${i + 1}</b><div><b>${escapeHtml(x.name || '匿名玩家')}${badge}</b><br><span>${timeText}</span></div><b>${scoreValue(x)} 分</b></div>`;
   }).join('') || '<p class="empty-note">还没有完成全部挑战的侦探</p>';
 }
 
@@ -1117,6 +1143,12 @@ function setChangelogOpen(open) {
 
 function setHistoryOpen(open) {
   const modal = $('#historyModal');
+  if (!modal) return;
+  modal.classList.toggle('hidden', !open);
+}
+
+function setRankingOpen(open) {
+  const modal = $('#rankingModal');
   if (!modal) return;
   modal.classList.toggle('hidden', !open);
 }
@@ -1172,12 +1204,12 @@ function renderHistory(data = {}) {
   const rounds = Array.isArray(data.rounds) ? data.rounds : [];
   const progressText = total ? `已探索 ${answered} / ${total} 个声音线索` : '题库还没有可用声音';
   const roundHtml = rounds.map(round => {
-    const profile = resultProfileForAccuracy(round.accuracy);
+    const profile = resultProfileForScore(round.score ?? round.correct, round.total);
     const iconUrl = resultImageUrl(round.profileFile || profile.file);
     return `<div class="history-round">
       <div class="history-icon"><img src="${iconUrl}" alt=""></div>
-      <div><time>${escapeHtml(historyTime(round.completedAt || round.startedAt))}</time><b>正确率</b></div>
-      <div class="history-accuracy">${Number(round.accuracy || 0)}%</div>
+      <div><time>${escapeHtml(historyTime(round.completedAt || round.startedAt))}</time><b>得分</b></div>
+      <div class="history-accuracy">${scoreValue(round)} 分</div>
     </div>`;
   }).join('');
   content.innerHTML = `
@@ -1223,6 +1255,35 @@ async function openHistory(button = null) {
   } finally {
     setButtonBusy(button, false);
     endAction('history-open');
+  }
+}
+
+async function openRanking(button = null) {
+  if (!beginAction('ranking-open', 1200, '正在读取排名，请稍候')) return;
+  setButtonBusy(button, true, '读取中...');
+  const target = $('#homeRanking');
+  if (target) target.innerHTML = '<p class="empty-note">正在读取排名...</p>';
+  setRankingOpen(true);
+  try {
+    deviceId = deviceId || getDeviceId();
+    const params = new URLSearchParams({ deviceId, limit: '10' });
+    const userId = user?.id || rememberedUserId();
+    if (userId) params.set('userId', userId);
+    if (TEST_MODE) params.set('testMode', '1');
+    const r = await fetch('/api/rankings?' + params.toString());
+    const x = await r.json();
+    if (!r.ok) throw Error(x.error || '读取排名失败');
+    if (x.user) {
+      user = x.user;
+      rememberUserIdentity(user);
+    }
+    renderRanking('#homeRanking', x.ranking || [], { currentUser: x.user || user, limit: 10 });
+    trackAnalytics('ranking_opened', { count: Array.isArray(x.ranking) ? x.ranking.length : 0 });
+  } catch (e) {
+    if (target) target.innerHTML = `<p class="empty-note">${escapeHtml(e.message || '读取失败，请稍后再试')}</p>`;
+  } finally {
+    setButtonBusy(button, false);
+    endAction('ranking-open');
   }
 }
 
@@ -2464,20 +2525,20 @@ async function result() {
   try {
     toast('正在整理本轮成绩...');
     const r = await api('/api/game/result/' + game.sessionId);
-    addClientEvent('result_response', '前端已收到结算结果', { accuracy: r.accuracy, correct: r.correct }, true);
+    addClientEvent('result_response', '前端已收到结算结果', { score: r.score ?? r.correct, correct: r.correct }, true);
     trackAnalytics('round_complete', {
       durationMs: roundStartedAt ? Date.now() - roundStartedAt : 0,
       correct: r.correct,
       total: r.total,
-      accuracy: r.accuracy,
+      score: r.score ?? r.correct,
       playthrough: r.playthrough,
       libraryAnswered: r.libraryAnswered,
       libraryTotal: r.libraryTotal,
       libraryCompletionPending: Boolean(r.libraryCompletionPending)
     });
     pendingCompleteResult = r.libraryCompletionPending ? r : null;
-    renderResultProfile('summary', resultProfileForAccuracy(r.accuracy));
-    $('#score').innerHTML = `${r.accuracy}<small>%</small>`;
+    renderResultProfile('summary', resultProfileForScore(r.score ?? r.correct, r.total));
+    $('#score').innerHTML = `${scoreValue(r)}<small>分</small>`;
     $('#correctNum').textContent = `${r.correct} / ${r.total}`;
     renderAnswerReview('#answerReview', r.answerReview);
     renderRanking('#ranking', r.ranking, { currentUser: r.user, limit: 5 });
@@ -2572,6 +2633,9 @@ function bindUiEvents() {
   const historyOpen = $('#historyOpen');
   const historyClose = $('#historyClose');
   const historyBackdrop = $('#historyBackdrop');
+  const rankingOpen = $('#rankingOpen');
+  const rankingClose = $('#rankingClose');
+  const rankingBackdrop = $('#rankingBackdrop');
   const replay = $('#replay');
   const modeSwitch = $('#switch');
   const submitText = $('#submitText');
@@ -2591,6 +2655,12 @@ function bindUiEvents() {
   };
   if (historyClose) historyClose.onclick = () => setHistoryOpen(false);
   if (historyBackdrop) historyBackdrop.onclick = () => setHistoryOpen(false);
+  if (rankingOpen) rankingOpen.onclick = e => {
+    e.preventDefault();
+    openRanking(e.currentTarget);
+  };
+  if (rankingClose) rankingClose.onclick = () => setRankingOpen(false);
+  if (rankingBackdrop) rankingBackdrop.onclick = () => setRankingOpen(false);
   $$('[data-share]').forEach(x => x.onclick = e => {
     e.preventDefault();
     share(e.currentTarget);

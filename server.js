@@ -1453,7 +1453,7 @@ function userAnswerTotals(u, sessions=[]) {
       if(answer.correct) correct++;
     }
   }
-  return {total,correct,accuracy:total ? Math.round(correct/total*100) : 0};
+  return {total,correct,score:correct};
 }
 function userPublic(u, allSounds, sessions=[]) { const progress=libraryProgress(u, allSounds, sessions); const totals=userAnswerTotals(u,sessions); return { ...u, ...totals, answeredCount:progress.libraryAnswered, completion:progress.libraryCompletion, ...progress, libraryCompletionPending:Boolean(activeLibraryCompletionPending(u)) }; }
 function clientInfoFromEvent(event) {
@@ -1488,13 +1488,13 @@ function completeRankingForUsers(data, currentUser=null) {
       name:cleanUserName(u.name)||'匿名玩家',
       total:totals.total,
       correct:totals.correct,
-      accuracy:totals.accuracy,
+      score:totals.score,
       playthrough:Number(latest.playthrough||1)||1,
       completedAt:latest.shownAt||latest.completedAt||'',
       shownAt:latest.shownAt||'',
       current:Boolean(currentId&&u.id===currentId)
     };
-  }).filter(Boolean).sort((a,b)=>new Date(b.completedAt||0)-new Date(a.completedAt||0));
+  }).filter(Boolean).sort((a,b)=>Number(b.score||0)-Number(a.score||0)||new Date(a.completedAt||0)-new Date(b.completedAt||0));
   if(currentId) {
     const index=rows.findIndex(x=>x.id===currentId);
     if(index>0) rows.unshift(rows.splice(index,1)[0]);
@@ -1503,11 +1503,20 @@ function completeRankingForUsers(data, currentUser=null) {
   return rows.slice(0,10);
 }
 function completedRoundsForUser(userId, sessions) { return sessions.filter(s=>s.userId===userId&&(s.soundIds||[]).length>0&&(s.answers||[]).length>=(s.soundIds||[]).length).length; }
-function resultProfileKeyForAccuracy(accuracy) {
-  const value=Number(accuracy)||0;
-  if(value>=100) return 'perfect';
-  if(value>=60) return 'good';
-  if(value>=20) return 'low';
+function scoreRankingRows(data) {
+  return (data.users||[])
+    .filter(u=>!isTestUser(u))
+    .map(u=>({...userPublic(u,data.sounds,data.sessions),completedRounds:completedRoundsForUser(u.id,data.sessions)}))
+    .filter(u=>u.completedRounds>=1)
+    .sort((a,b)=>Number(b.score||0)-Number(a.score||0)||Number(b.completedRounds||0)-Number(a.completedRounds||0)||Number(b.total||0)-Number(a.total||0)||new Date(b.lastSeen||0)-new Date(a.lastSeen||0))
+    .map((row,index)=>({...row,rank:index+1}));
+}
+function resultProfileKeyForScore(score, total=5) {
+  const value=Number(score)||0;
+  const fullScore=Math.max(1,Number(total)||5);
+  if(value>=fullScore) return 'perfect';
+  if(value>=3) return 'good';
+  if(value>=1) return 'low';
   return 'zero';
 }
 function resultProfileFile(profileKey) {
@@ -1529,13 +1538,14 @@ function roundHistoryForUser(userId, sessions=[]) {
     .map(s=>{
       const total=(s.soundIds||[]).length;
       const correct=(s.answers||[]).filter(a=>a.correct).length;
-      const accuracy=total?Math.round(correct/total*100):0;
-      const profileKey=resultProfileKeyForAccuracy(accuracy);
+      const profileKey=resultProfileKeyForScore(correct,total);
       return {
         sessionId:s.id,
         startedAt:s.startedAt||'',
         completedAt:sessionCompletedAt(s),
-        accuracy,
+        score:correct,
+        correct,
+        total,
         profileKey,
         profileFile:resultProfileFile(profileKey)
       };
@@ -1606,7 +1616,7 @@ function adminUserAnswerHistory(data, u) {
       total,
       answered,
       correct,
-      accuracy:answered ? Math.round(correct/answered*100) : 0,
+      score:correct,
       records
     };
   });
@@ -1746,33 +1756,103 @@ function selectRoundSounds(user, data, size=5) {
     }
   };
 }
-function codexSessionFiles(dir=path.join(os.homedir(),'.codex','sessions'), out=[]) {
-  if(!fs.existsSync(dir)) return out;
-  for(const name of fs.readdirSync(dir)) {
-    const file=path.join(dir,name);
-    let st;
-    try { st=fs.statSync(file); } catch { continue; }
-    if(st.isDirectory()) codexSessionFiles(file,out);
-    else if(name.endsWith('.jsonl')) out.push(file);
-  }
-  return out;
+const ENGINEERING_EXTENSIONS=new Set(['.js','.mjs','.html','.css','.toml','.json','.md','.sql']);
+const ENGINEERING_EXCLUDED_DIRS=['.git','.netlify','.certs','node_modules','dist','data','uploads','图片文件','声音文件','tools/whisper-local','tools/sensevoice'];
+const ENGINEERING_EXCLUDED_FILES=new Set(['package-lock.json']);
+function engineeringRelative(file, root=ROOT) {
+  return path.relative(root,file).split(path.sep).join('/');
 }
-function latestTokenUsageFromText(text) {
-  let latest=null;
-  for(const line of text.split(/\r?\n/)) {
-    if(!line.includes('"token_count"')) continue;
-    let event;
-    try { event=JSON.parse(line); } catch { continue; }
-    const usage=event?.payload?.info?.total_token_usage;
-    if(event?.type==='event_msg'&&event?.payload?.type==='token_count'&&usage?.total_tokens) {
-      latest={timestamp:event.timestamp, usage};
+function isExcludedEngineeringDir(rel) {
+  return ENGINEERING_EXCLUDED_DIRS.some(dir=>rel===dir||rel.startsWith(`${dir}/`));
+}
+function isExcludedEngineeringFile(rel) {
+  return ENGINEERING_EXCLUDED_FILES.has(rel);
+}
+function engineeringCategory(rel) {
+  if(rel.startsWith('public/')&&/\.(?:html|css|js)$/i.test(rel)) return '前端界面';
+  if(rel==='server.js'||rel.startsWith('netlify/functions/')) return '服务端/API';
+  if(rel.startsWith('scripts/')||rel.startsWith('docs/')||rel.startsWith('tools/')||rel==='netlify.toml'||rel==='package.json'||rel==='README.md'||rel==='DX100-声音游戏.md') return '脚本/配置';
+  return '其他工程文件';
+}
+function countEngineeringLines(text) {
+  if(!text) return {sourceLines:0,codeLines:0};
+  return {
+    sourceLines:(text.match(/\n/g)||[]).length+(text.endsWith('\n')?0:1),
+    codeLines:text.split(/\r?\n/).filter(line=>line.trim()).length
+  };
+}
+function scanEngineeringStats(root=ROOT) {
+  const stack=[root], files=[], categories={};
+  let sourceLines=0, codeLines=0, sourceBytes=0;
+  while(stack.length) {
+    const dir=stack.pop();
+    let entries=[];
+    try { entries=fs.readdirSync(dir,{withFileTypes:true}); } catch { continue; }
+    for(const entry of entries) {
+      const file=path.join(dir,entry.name);
+      const rel=engineeringRelative(file,root);
+      if(entry.isDirectory()) {
+        if(!isExcludedEngineeringDir(rel)) stack.push(file);
+        continue;
+      }
+      if(!entry.isFile()) continue;
+      if(!ENGINEERING_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
+      if(isExcludedEngineeringDir(path.dirname(rel))||isExcludedEngineeringFile(rel)) continue;
+      let text='';
+      try { text=fs.readFileSync(file,'utf8'); } catch { continue; }
+      const lines=countEngineeringLines(text);
+      const category=engineeringCategory(rel);
+      categories[category] ||= {fileCount:0,codeLines:0,sourceLines:0};
+      categories[category].fileCount+=1;
+      categories[category].codeLines+=lines.codeLines;
+      categories[category].sourceLines+=lines.sourceLines;
+      files.push(rel);
+      codeLines+=lines.codeLines;
+      sourceLines+=lines.sourceLines;
+      sourceBytes+=Buffer.byteLength(text);
     }
   }
-  return latest;
+  return {
+    source:'runtime-source-scan',
+    updatedAt:new Date().toISOString(),
+    rootName:path.basename(root),
+    fileCount:files.length,
+    codeLines,
+    sourceLines,
+    sourceBytes,
+    categories,
+    excludes:'不含声音素材、图片素材、题库数据、录音和依赖包'
+  };
 }
-function projectSessionScore(text) {
-  const markers=[ROOT,path.basename(ROOT),'声音侦探','声音游戏','声音文件'];
-  return markers.reduce((sum,marker)=>sum+(marker&&text.includes(marker)?1:0),0);
+function readEngineeringManifest() {
+  const candidates=[
+    envValue('DX100_ENGINEERING_STATS_PATH'),
+    path.join(ROOT,'data','engineering-stats.json')
+  ].filter(Boolean);
+  for(const file of candidates) {
+    try {
+      if(!fs.existsSync(file)) continue;
+      const stats=JSON.parse(fs.readFileSync(file,'utf8'));
+      if(stats?.codeLines&&stats?.fileCount) return {...stats, source:stats.source||'build-metrics-manifest'};
+    } catch {}
+  }
+  return null;
+}
+function codebaseStats() {
+  let scanned=null;
+  try { scanned=scanEngineeringStats(ROOT); } catch { scanned=null; }
+  const manifest=readEngineeringManifest();
+  const chosen=manifest&&(!scanned||manifest.fileCount>=scanned.fileCount||isNetlifyRuntime()) ? manifest : scanned;
+  return chosen||{
+    source:'codebase-metrics-unavailable',
+    updatedAt:new Date().toISOString(),
+    fileCount:0,
+    codeLines:0,
+    sourceLines:0,
+    sourceBytes:0,
+    categories:{},
+    excludes:'不含声音素材、图片素材、题库数据、录音和依赖包'
+  };
 }
 function asrTranscriptionCount(data=readStore()) {
   const seen=new Set();
@@ -1798,28 +1878,7 @@ function asrTranscriptionCount(data=readStore()) {
 }
 function teamStats() {
   const asrTranscriptionCountValue=asrTranscriptionCount();
-  const sessions=[];
-  for(const file of codexSessionFiles()) {
-    let text;
-    try { text=fs.readFileSync(file,'utf8'); } catch { continue; }
-    const score=projectSessionScore(text);
-    if(!score) continue;
-    const latest=latestTokenUsageFromText(text);
-    if(!latest) continue;
-    sessions.push({file,score,...latest});
-  }
-  if(!sessions.length) return { totalTokens:null, source:'codex-session-log', updatedAt:null, sessionCount:0, asrTranscriptionCount:asrTranscriptionCountValue };
-  const total=sessions.reduce((acc,s)=>{
-    const u=s.usage;
-    acc.inputTokens+=u.input_tokens||0;
-    acc.cachedInputTokens+=u.cached_input_tokens||0;
-    acc.outputTokens+=u.output_tokens||0;
-    acc.reasoningOutputTokens+=u.reasoning_output_tokens||0;
-    acc.totalTokens+=u.total_tokens||0;
-    return acc;
-  },{inputTokens:0,cachedInputTokens:0,outputTokens:0,reasoningOutputTokens:0,totalTokens:0});
-  const updatedAt=sessions.map(s=>s.timestamp).filter(Boolean).sort().at(-1)||new Date().toISOString();
-  return { ...total, source:'codex-session-log', sessionCount:sessions.length, updatedAt, asrTranscriptionCount:asrTranscriptionCountValue };
+  return { ...codebaseStats(), asrTranscriptionCount:asrTranscriptionCountValue };
 }
 function fileMeta(file) {
   try {
@@ -2956,6 +3015,16 @@ async function handleRequest(req,res) { try {
     await hydrateCloudSidecars(activeCloudContext().store,data);
   }
   if(req.method==='GET'&&p==='/api/sounds') return send(res,200,data.sounds.map(publicSound));
+  if(req.method==='GET'&&p==='/api/rankings') {
+    const limit=Math.max(1,Math.min(50,Number(url.searchParams.get('limit')||10)||10));
+    const currentUser=getUserById(data,url.searchParams.get('userId')||'')||findRealUserByDeviceId(data,url.searchParams.get('deviceId')||'');
+    const ranking=scoreRankingRows(data);
+    const currentRank=currentUser ? ranking.find(x=>x.id===currentUser.id) : null;
+    return send(res,200,{
+      ranking:ranking.slice(0,limit),
+      user:currentRank || (currentUser ? userPublic(currentUser,data.sounds,sessionsFor(data,currentUser)) : null)
+    });
+  }
   if(req.method==='GET'&&p==='/api/admin/sounds') return send(res,200,data.sounds.map(s=>adminSound(s,data.users)));
   if(req.method==='GET'&&p==='/api/admin/users') return send(res,200,data.users.filter(u=>!isTestUser(u)).map(u=>userPublicWithClient(data,u,data.sounds,data.sessions)).sort((a,b)=>new Date(b.lastSeen)-new Date(a.lastSeen)));
   const adminUserAnswersMatch=p.match(/^\/api\/admin\/users\/([^/]+)\/answers$/);
@@ -3148,7 +3217,7 @@ async function handleRequest(req,res) { try {
     if(!u)return send(res,404,{error:'用户不存在'});
     const testMode=isTestSession(s)||isTestUser(u);
     const sessionList=sessionsFor(resultData,s);
-    const correct=s.answers.filter(a=>a.correct).length, total=s.soundIds.length, accuracy=total?Math.round(correct/total*100):0;
+    const correct=s.answers.filter(a=>a.correct).length, total=s.soundIds.length, score=correct;
     const progress=libraryProgress(u,resultData.sounds,sessionList,sessionPlaythrough(s));
     const pending=ensureLibraryCompletionPending(u,s,progress);
     const libraryCompletedThisRound=Boolean(pending&&pending.sessionId===s.id);
@@ -3167,10 +3236,11 @@ async function handleRequest(req,res) { try {
         statusText:a ? (recognized ? '' : '未识别到文字') : audioState ? (audioState.status==='processing'||audioState.status==='queued'?'识别中':'未识别到文字') : ''
       };
     });
-    const ranking=resultData.users.filter(u=>!isTestUser(u)).map(u=>({...userPublic(u,resultData.sounds,resultData.sessions),completedRounds:completedRoundsForUser(u.id,resultData.sessions)})).filter(u=>u.completedRounds>=1).sort((a,b)=>b.accuracy-a.accuracy||b.total-a.total||b.completedRounds-a.completedRounds);
-    appendMonitor(s,'server','result_requested','后端已返回结算结果',{correct,total,accuracy,playthrough:sessionPlaythrough(s),libraryAnswered:progress.libraryAnswered,libraryTotal:progress.libraryTotal,libraryCompletedThisRound,libraryCompletionPending:Boolean(pending),pendingRecognitions:resolved.pendingCount||0});
+    const ranking=scoreRankingRows(resultData);
+    const currentRank=ranking.find(x=>x.id===u.id)||null;
+    appendMonitor(s,'server','result_requested','后端已返回结算结果',{correct,total,score,playthrough:sessionPlaythrough(s),libraryAnswered:progress.libraryAnswered,libraryTotal:progress.libraryTotal,libraryCompletedThisRound,libraryCompletionPending:Boolean(pending),pendingRecognitions:resolved.pendingCount||0});
     if(!testMode) writeStore(resultData);
-    return send(res,200,{correct,total,accuracy,answerReview,ranking:ranking.slice(0,10),completeRanking:completeRankingForUsers(resultData,u),user:userPublic(u,resultData.sounds,sessionList),finishedRank:ranking.findIndex(x=>x.id===u.id)+1,...progress,libraryCompletedThisRound,libraryCompletionPending:Boolean(pending),completionSessionId:pending?.sessionId||'',pendingRecognitions:resolved.pendingCount||0,testMode});
+    return send(res,200,{correct,total,score,answerReview,ranking:ranking.slice(0,10),completeRanking:completeRankingForUsers(resultData,u),user:currentRank||userPublic(u,resultData.sounds,sessionList),finishedRank:currentRank?.rank||0,...progress,libraryCompletedThisRound,libraryCompletionPending:Boolean(pending),completionSessionId:pending?.sessionId||'',pendingRecognitions:resolved.pendingCount||0,testMode});
   }
   if(req.method==='POST'&&p==='/api/game/complete-shown') {
     const x=JSON.parse((await body(req)).toString());

@@ -4,27 +4,28 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>声音侦探</title>
-  <link rel="stylesheet" href="/public/style.css?v=0.1076-20260814">
+  <link rel="stylesheet" href="/public/style.css?v=0.1079-20260814">
 </head>
 <body>
   <main class="app">
     <section id="welcome">
       <button id="changelogOpen" class="version-chip" type="button" aria-label="查看更新日志" title="更新日志">
         <span class="changelog-icon" aria-hidden="true">!</span>
-        <span id="appVersion">0.1076-20260814</span>
+        <span id="appVersion">0.1079-20260814</span>
       </button>
       <a class="home-team-link" href="/team.html">Credits</a>
       <div class="hero">
         <h1 class="brand-title">
-          <img src="/public/brand-wordmark.svg?v=0.1076-20260814" alt="声音侦探">
+          <img src="/public/brand-wordmark.svg?v=0.1079-20260814" alt="声音侦探">
         </h1>
       </div>
-      <img class="howto-image" src="/public/how-to-play.svg?v=0.1076-20260814" alt="划火柴声音回答示例">
+      <img class="howto-image" src="/public/how-to-play.svg?v=0.1079-20260814" alt="划火柴声音回答示例">
       <div class="card">
         <label for="name">你的昵称</label>
         <input class="input" id="name" maxlength="20" placeholder="例如：王牌侦探" autocomplete="nickname">
         <button class="primary" id="start" type="button">开始挑战</button>
         <button class="share history-open" id="historyOpen" type="button">过往成绩</button>
+        <button class="share ranking-open" id="rankingOpen" type="button">查看排名</button>
         <button class="share" data-share type="button">分享给朋友</button>
       </div>
     </section>
@@ -85,7 +86,7 @@
         <div id="answerReview"></div>
       </div>
       <div class="card ranking">
-        <b>侦探排行榜 · 正确率 TOP 5</b>
+        <b>侦探排行榜 · 总分 TOP 5</b>
         <p class="rank-note">仅展示至少完成 1 轮的玩家</p>
         <div id="ranking"></div>
       </div>
@@ -113,7 +114,7 @@
       </div>
       <div class="card ranking">
         <b>完成全部挑战的侦探</b>
-        <p class="rank-note">按完成时间倒序，当前侦探置顶</p>
+        <p class="rank-note">按累计得分排序，当前侦探置顶</p>
         <div id="completeRanking"></div>
       </div>
       <button class="primary" id="completeAgain" type="button">重新开始</button>
@@ -126,7 +127,7 @@
       <div class="modal-head">
         <div>
           <span>Demo 更新日志</span>
-          <b id="changelogTitle">0.1076-20260814</b>
+          <b id="changelogTitle">0.1079-20260814</b>
         </div>
         <button id="changelogClose" type="button" aria-label="关闭更新日志">×</button>
       </div>
@@ -145,7 +146,23 @@
       <div class="history-content" id="historyContent"></div>
     </div>
   </div>
+  <div class="modal hidden" id="rankingModal" role="dialog" aria-modal="true" aria-labelledby="rankingTitle">
+    <div class="modal-backdrop" id="rankingBackdrop"></div>
+    <div class="modal-card ranking-card">
+      <div class="modal-head">
+        <div>
+          <span>侦探排行榜</span>
+          <b id="rankingTitle">总分 TOP10</b>
+        </div>
+        <button id="rankingClose" type="button" aria-label="关闭排名">×</button>
+      </div>
+      <div class="history-content ranking-content" id="rankingContent">
+        <p class="rank-note">仅展示至少完成 1 轮的玩家</p>
+        <div id="homeRanking"></div>
+      </div>
+    </div>
+  </div>
   <div class="toast hidden" id="toast"></div>
-  <script src="/public/app.js?v=0.1076-20260814"></script>
+  <script src="/public/app.js?v=0.1079-20260814"></script>
 </body>
 </html>

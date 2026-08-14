@@ -14,11 +14,11 @@ function date(s) {
   return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('zh-CN', { hour12: false });
 }
 
-function accuracyCell(user) {
+function scoreCell(user) {
   const total = Number(user.total || 0);
   const correct = Number(user.correct || 0);
-  const accuracy = total ? Math.round(correct / total * 100) : 0;
-  return `<b>${accuracy}%</b><small>累计答对 ${correct} / ${total} 题</small>`;
+  const score = Number(user.score ?? correct) || 0;
+  return `<b>${score} 分</b><small>累计答对 ${correct} 题，已答 ${total} 题</small>`;
 }
 
 function clientText(user = {}) {
@@ -176,7 +176,7 @@ async function loadUsers() {
       <td>${date(u.firstSeen)}</td>
       <td>${date(u.lastSeen)}</td>
       <td>${Number(u.total || 0)} 题</td>
-      <td>${accuracyCell(u)}</td>
+      <td>${scoreCell(u)}</td>
       <td><button class="history-open user-answer-open" type="button" data-user-id="${esc(u.id)}">回答记录</button></td>
     </tr>
   `).join('') || '<tr><td colspan="7">尚无用户数据</td></tr>';

@@ -17,6 +17,93 @@ const EXCLUDE = new Set([
   'admin.css',
   'dx100-root-ca.crt'
 ]);
+const SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.html', '.css', '.toml', '.json', '.md', '.sql']);
+const METRIC_EXCLUDED_DIRS = new Set(['.git', '.netlify', '.certs', 'node_modules', 'dist', 'data', 'uploads', '图片文件', '声音文件']);
+const METRIC_EXCLUDED_PREFIXES = ['tools/whisper-local', 'tools/sensevoice'];
+const METRIC_EXCLUDED_FILES = new Set(['package-lock.json']);
+
+function metricRelative(file) {
+  return path.relative(ROOT, file).split(path.sep).join('/');
+}
+
+function isMetricExcludedDir(relative) {
+  return METRIC_EXCLUDED_DIRS.has(relative) || METRIC_EXCLUDED_PREFIXES.some(prefix => relative === prefix || relative.startsWith(`${prefix}/`));
+}
+
+function isMetricExcludedFile(relative) {
+  return METRIC_EXCLUDED_FILES.has(relative);
+}
+
+function metricCategory(relative) {
+  if (relative.startsWith('public/') && /\.(?:html|css|js)$/i.test(relative)) return '前端界面';
+  if (relative === 'server.js' || relative.startsWith('netlify/functions/')) return '服务端/API';
+  if (relative.startsWith('scripts/') || relative.startsWith('docs/') || relative.startsWith('tools/') || relative === 'netlify.toml' || relative === 'package.json' || relative === 'README.md' || relative === 'DX100-声音游戏.md') return '脚本/配置';
+  return '其他工程文件';
+}
+
+function countMetricLines(text) {
+  if (!text) return { sourceLines: 0, codeLines: 0 };
+  return {
+    sourceLines: (text.match(/\n/g) || []).length + (text.endsWith('\n') ? 0 : 1),
+    codeLines: text.split(/\r?\n/).filter(line => line.trim()).length
+  };
+}
+
+function writeEngineeringStats() {
+  const stack = [ROOT];
+  const files = [];
+  const categories = {};
+  let codeLines = 0;
+  let sourceLines = 0;
+  let sourceBytes = 0;
+
+  while (stack.length) {
+    const dir = stack.pop();
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      const file = path.join(dir, entry.name);
+      const relative = metricRelative(file);
+      if (entry.isDirectory()) {
+        if (!isMetricExcludedDir(relative)) stack.push(file);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      if (!SOURCE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) continue;
+      if (isMetricExcludedDir(path.dirname(relative)) || isMetricExcludedFile(relative)) continue;
+
+      let text = '';
+      try { text = fs.readFileSync(file, 'utf8'); } catch { continue; }
+      const lines = countMetricLines(text);
+      const category = metricCategory(relative);
+      categories[category] ||= { fileCount: 0, codeLines: 0, sourceLines: 0 };
+      categories[category].fileCount += 1;
+      categories[category].codeLines += lines.codeLines;
+      categories[category].sourceLines += lines.sourceLines;
+      files.push(relative);
+      codeLines += lines.codeLines;
+      sourceLines += lines.sourceLines;
+      sourceBytes += Buffer.byteLength(text);
+    }
+  }
+
+  files.sort((a, b) => a.localeCompare(b, 'zh-CN'));
+  const stats = {
+    source: 'build-metrics-manifest',
+    updatedAt: new Date().toISOString(),
+    rootName: path.basename(ROOT),
+    fileCount: files.length,
+    codeLines,
+    sourceLines,
+    sourceBytes,
+    categories,
+    excludes: '不含声音素材、图片素材、题库数据、录音和依赖包',
+    files
+  };
+  fs.mkdirSync(path.join(ROOT, 'data'), { recursive: true });
+  fs.writeFileSync(path.join(ROOT, 'data', 'engineering-stats.json'), `${JSON.stringify(stats, null, 2)}\n`);
+  console.log(`工程量统计已更新：${stats.codeLines} 行代码，${stats.fileCount} 个工程文件`);
+}
 
 function appVersion() {
   const source = fs.readFileSync(path.join(PUBLIC_DIR, 'app.js'), 'utf8');
@@ -45,6 +132,7 @@ function copyDir(from, to) {
   }
 }
 
+writeEngineeringStats();
 fs.rmSync(DIST_DIR, { recursive: true, force: true });
 copyDir(PUBLIC_DIR, DIST_PUBLIC_DIR);
 const version = appVersion();
