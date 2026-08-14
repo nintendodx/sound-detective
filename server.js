@@ -631,6 +631,7 @@ function normalizeAnswerHistory(data) {
   const sounds=Array.isArray(data.sounds)?data.sounds:[];
   const byId=new Map(sounds.map(s=>[s.id,s]));
   const sessionKeysBySound=new Map();
+  const sessionRecordsBySound=new Map();
   const sessionIds=new Set();
   for(const session of Array.isArray(data.sessions)?data.sessions:[]) {
     if(session?.id) sessionIds.add(session.id);
@@ -642,6 +643,8 @@ function normalizeAnswerHistory(data) {
       const key=answerHistoryKey(sound.id,rec.sessionId,rec.at,rec.answer);
       if(!sessionKeysBySound.has(sound.id)) sessionKeysBySound.set(sound.id,new Set());
       sessionKeysBySound.get(sound.id).add(key);
+      if(!sessionRecordsBySound.has(sound.id)) sessionRecordsBySound.set(sound.id,new Map());
+      sessionRecordsBySound.get(sound.id).set(key,rec);
     }
   }
   const seenBySound=new Map();
@@ -663,6 +666,11 @@ function normalizeAnswerHistory(data) {
       };
       const key=answerHistoryKey(sound.id,rec.sessionId,rec.at,rec.answer);
       if(rec.sessionId&&sessionIds.has(rec.sessionId)&&!validSessionKeys.has(key)) { changed=true; continue; }
+      const sessionRec=sessionRecordsBySound.get(sound.id)?.get(key);
+      if(sessionRec&&rec.correct!==Boolean(sessionRec.correct)) {
+        rec.correct=Boolean(sessionRec.correct);
+        changed=true;
+      }
       if(seen.has(key)) { changed=true; continue; }
       seen.add(key);
       clean.push(rec);
@@ -1275,9 +1283,15 @@ function affirmativeText(text) {
     .replace(/不太像.+$/,'')
     .replace(/没有.+$/,'');
 }
-function uniqueTerms(sound) {
+function allSemanticTerms(sound) {
   return [...new Set([sound.name, ...(sound.tags||[]), ...(SEMANTIC_INTENTS[sound.id]||[])]
-    .map(semanticText).filter(t=>t.length>=2))];
+    .map(semanticText).filter(Boolean))];
+}
+function uniqueTerms(sound) {
+  return allSemanticTerms(sound).filter(t=>t.length>=2);
+}
+function uniqueExactTerms(sound) {
+  return allSemanticTerms(sound);
 }
 function charOverlap(a,b) {
   const aa=[...new Set([...a])], bb=new Set([...b]);
@@ -1285,8 +1299,12 @@ function charOverlap(a,b) {
 }
 function semanticMatch(sound, answer) {
   const answerText=affirmativeText(semanticText(answer));
+  const exactTerms=uniqueExactTerms(sound);
   const terms=uniqueTerms(sound).sort((a,b)=>b.length-a.length);
   if(!answerText) return {ok:false, score:0, type:'empty', matched:''};
+  for(const term of exactTerms.filter(t=>t.length===1)) {
+    if(answerText===term&&!isNegatedAt(answerText,0)) return {ok:true, score:1, type:'single_term_exact', matched:term};
+  }
   for(const term of terms) {
     const at=answerText.indexOf(term);
     if(at>=0&&!isNegatedAt(answerText,at)) return {ok:true, score:1, type:'term_contains', matched:term};

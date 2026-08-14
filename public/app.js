@@ -1,6 +1,6 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const APP_VERSION = '0.1075-20260813';
+const APP_VERSION = '0.1076-20260814';
 const TEST_MODE = (() => {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -14,6 +14,13 @@ const DEVICE_COOKIE_NAME = 'voiceDetectiveDeviceId';
 const USER_COOKIE_NAME = 'voiceDetectiveUserId';
 const NAME_COOKIE_NAME = 'voiceDetectiveName';
 const CHANGELOG = [
+  {
+    version: '0.1076-20260814',
+    items: [
+      '修复“猫”等单字标签答案被过滤后判错的问题。',
+      '历史重判后会同步声音回答统计里的正误结果。'
+    ]
+  },
   {
     version: '0.1075-20260813',
     items: [
