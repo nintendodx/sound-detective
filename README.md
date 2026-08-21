@@ -1,6 +1,6 @@
 # DX100 声音游戏
 
-一个无需数据库和第三方依赖的本机服务原型。数据保存在 `data/store.json`，上传音频保存在 `uploads/`。
+一个本地可运行、云端可直接发布的声音识别游戏。数据保存在 `data/store.json`，上传音频保存在 `uploads/`。
 
 ## 启动
 
@@ -59,7 +59,7 @@ STT_LANGUAGE=zh
 
 ## 云端发布
 
-项目支持本地开发、云端发布的双运行方式。云端使用 Netlify 免费域名、Netlify Functions、Netlify Blobs 和百度 ASR；本地仍然保留 `npm start` 的文件读写模式。发布和数据同步流程见 [`docs/CLOUD_RELEASE.md`](docs/CLOUD_RELEASE.md)。
+正式环境只使用 Cloudflare Pages Direct Upload。Pages 直接承载静态资源、游戏 API、语音 WebSocket、KV 和 R2，不依赖单独的游戏 Worker，也不依赖 GitHub 在线构建。Admin 后台继续独立部署。发布、备份和恢复流程见 [`docs/CLOUD_RELEASE.md`](docs/CLOUD_RELEASE.md)。
 
 ## 语音识别与判题
 

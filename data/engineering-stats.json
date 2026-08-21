@@ -1,34 +1,39 @@
 {
   "source": "build-metrics-manifest",
-  "updatedAt": "2026-08-14T08:58:14.382Z",
+  "updatedAt": "2026-08-21T13:25:33.118Z",
   "rootName": "voice game",
-  "fileCount": 28,
-  "codeLines": 9988,
-  "sourceLines": 10400,
-  "sourceBytes": 379619,
+  "fileCount": 34,
+  "codeLines": 15589,
+  "sourceLines": 16360,
+  "sourceBytes": 616667,
   "categories": {
     "脚本/配置": {
-      "fileCount": 12,
-      "codeLines": 998,
-      "sourceLines": 1164
+      "fileCount": 14,
+      "codeLines": 1176,
+      "sourceLines": 1351
     },
     "服务端/API": {
-      "fileCount": 2,
-      "codeLines": 3385,
-      "sourceLines": 3410
+      "fileCount": 3,
+      "codeLines": 6331,
+      "sourceLines": 6596
+    },
+    "其他工程文件": {
+      "fileCount": 1,
+      "codeLines": 164,
+      "sourceLines": 177
     },
     "前端界面": {
-      "fileCount": 14,
-      "codeLines": 5605,
-      "sourceLines": 5826
+      "fileCount": 16,
+      "codeLines": 7918,
+      "sourceLines": 8236
     }
   },
   "excludes": "不含声音素材、图片素材、题库数据、录音和依赖包",
   "files": [
+    "cloudflare/light-game.mjs",
+    "cloudflare/worker.mjs",
     "docs/CLOUD_RELEASE.md",
     "DX100-声音游戏.md",
-    "netlify.toml",
-    "netlify/functions/voice-game.mjs",
     "package.json",
     "public/admin-analytics.html",
     "public/admin-analytics.js",
@@ -41,17 +46,23 @@
     "public/admin.js",
     "public/app.js",
     "public/index.html",
+    "public/pcm-worklet.js",
+    "public/shared/voice-asr-client.js",
     "public/style.css",
     "public/team.html",
     "public/team.js",
     "README.md",
-    "scripts/build-netlify.js",
-    "scripts/release-cloud.js",
-    "scripts/sync-cloud-data.mjs",
+    "scripts/build-cloudflare-pages.js",
+    "scripts/build-cloudflare.js",
+    "scripts/release-cloudflare-pages.js",
+    "scripts/sync-cloudflare-data.mjs",
+    "scripts/sync-cloudflare-secrets.mjs",
     "server.js",
+    "shared/asr-health-worker.mjs",
     "tools/asr-compare-baidu.js",
     "tools/asr-compare-minimax.js",
     "tools/asr-compare-minimax.md",
-    "tools/https-proxy.js"
+    "tools/https-proxy.js",
+    "wrangler.jsonc"
   ]
 }

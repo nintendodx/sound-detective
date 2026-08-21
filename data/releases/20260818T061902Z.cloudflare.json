@@ -1,0 +1,20 @@
+{
+  "id": "20260818T061902Z",
+  "createdAt": "2026-08-18T06:19:02.838Z",
+  "mode": "cloudflare-workers",
+  "workerName": "sound-detective",
+  "gitCommit": "f2c6671",
+  "gitBranch": "main",
+  "counts": {
+    "sounds": 30,
+    "enabledSounds": 30,
+    "users": 45,
+    "sessions": 82,
+    "analyticsEvents": 3898
+  },
+  "synced": {
+    "data": true,
+    "assets": true,
+    "secrets": true
+  }
+}

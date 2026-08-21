@@ -1,92 +1,70 @@
-# 声音侦探云端发布流程
+# 声音侦探运维与恢复
 
-这个项目现在保留两种运行方式：
+## 架构
 
-- 本地开发：`npm start`，继续读写 `data/store.json` 和 `uploads/`。
-- 云端生产：Netlify 静态站点 + Netlify Functions + Netlify Blobs + 百度 ASR。
+正式站点为 `https://sound-detective.pages.dev`，使用 Cloudflare Pages Direct Upload：
 
-## 一次性准备
+- 静态页面由 Pages Assets 提供。
+- 游戏 API、实时 ASR WebSocket 和媒体路由由 Pages `_worker.js` 直接处理。
+- 游戏数据写入 `SOUND_DETECTIVE_DATA` KV，共用后台数据绑定 `ADMIN_HUB_DATA`。
+- 声音和图片优先读取 `ADMIN_HUB_ASSETS` R2，并保留 KV 资源回退。
+- Admin 后台独立部署；游戏不依赖任何单独的 Worker Service Binding。
 
-1. 创建私有 GitHub 仓库，建议仓库名使用 `sound-detective`。
-2. 创建 Netlify 项目，免费域名建议使用 `sound-detective.netlify.app`；如果名称被占用，换成 `dx100-sound-detective`。
-3. 在 Netlify 项目环境变量里设置：
+GitHub 只作为可选的私有源码备份。Cloudflare Pages 项目使用 Wrangler Direct Upload，不连接 Git Provider，因此玩家访问和日常发布都不依赖 GitHub。
 
-```bash
-DX100_STORAGE=netlify-blobs
-DX100_BLOBS_STORE=dx100-sound-game
-STT_PROVIDER=baidu
-BAIDU_API_KEY=你的百度 API Key
-BAIDU_SECRET_KEY=你的百度 Secret Key
-BAIDU_ASR_ENDPOINT=https://vop.baidu.com/pro_api
-BAIDU_ASR_DEV_PID=80001
-BAIDU_ASR_FORMAT=pcm
-BAIDU_ASR_RATE=16000
-BAIDU_ASR_CUID=voice-detective-cloud
-ADMIN_SECRET_PATH=/一段只有你知道的后台路径
-ADMIN_TOKEN=一段足够长的随机口令
-```
-
-本地执行发布脚本时，还需要在本机 `.env.cloud` 或 shell 里设置：
+## 本地开发
 
 ```bash
-NETLIFY_SITE_ID=你的 Netlify site id
-NETLIFY_AUTH_TOKEN=你的 Netlify personal access token
-```
-
-## 日常发版
-
-本地照常修改并验证：
-
-```bash
+npm install
 npm start
 ```
 
-验证通过后发布预览版：
+本地地址：`http://127.0.0.1:3000`。
+
+## 正式发布
+
+`.env.cloud` 需要配置百度、腾讯和豆包的七项 ASR 凭证。凭证只同步到 Cloudflare Pages Secrets，不进入源码或 Git。
 
 ```bash
-npm run release:preview
+npm run release
 ```
 
-确认预览没问题后发布生产：
+发布脚本依次执行语法检查、Pages 构建、Secrets 同步、Direct Upload，以及可选的数据与素材同步，并在 `data/releases/` 写入发布记录。
+
+只更新代码，保留线上数据、素材和 Secrets：
 
 ```bash
-npm run release:cloud
+npm run release -- --no-data --no-assets --no-secrets
 ```
 
-发布脚本会执行：
-
-1. `npm run check`
-2. `npm run build:netlify`
-3. 同步 `data/store.json`、`uploads/`、`图片文件/` 到 Netlify Blobs
-4. 部署到 Netlify
-5. 在 `data/releases/` 写入本次发布记录
-
-## 数据同步
-
-只把本地数据和素材推到云端：
+单独同步 Secrets：
 
 ```bash
-npm run cloud:push
+npm run cloudflare:secrets
 ```
 
-从云端拉回本地备份：
+## 数据备份
+
+查看云端 KV：
 
 ```bash
-npm run cloud:pull
+npm run cloudflare:list
 ```
 
-查看云端 Blobs 里已有内容：
+拉取云端数据和素材到本地：
 
 ```bash
-npm run cloud:list
+npm run cloudflare:pull
 ```
 
-## 后台入口
+拉取 `store.json` 前，脚本会为现有本地文件创建带时间戳的备份。建议定期执行，并将代码提交到本地 Git；GitHub 私有远程只承担异地源码备份。
 
-公网不会开放 `/admin.html`。后台入口由 `ADMIN_SECRET_PATH` 控制，例如：
+## 灾难恢复
 
-```text
-https://你的站点.netlify.app/一段只有你知道的后台路径
-```
+1. 从本地 Git 或 GitHub 私有备份恢复代码。
+2. 恢复 `.env.cloud`，执行 `npm install`。
+3. 使用 `npm run cloudflare:push` 恢复数据与素材。
+4. 使用 `npm run release` 重建并发布 Pages。
+5. 请求 `/api/asr/health?force=1`，确认可用 ASR 服务进入随机分配。
 
-第一次打开这个地址时，服务端会写入一个仅后台 API 使用的 cookie。之后后台页面内部可以正常跳转，但没有这个 cookie 的访问会返回 404。
+Cloudflare Pages 保留历史部署，可在新版本异常时立即回滚上一版本。GitHub 不参与玩家请求链路，因此大陆地区的 GitHub 网络波动不会影响已发布游戏。

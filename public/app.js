@@ -1,6 +1,6 @@
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
-const APP_VERSION = '0.1079-20260814';
+const APP_VERSION = '0.2.012-20260821';
 const TEST_MODE = (() => {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -9,11 +9,184 @@ const TEST_MODE = (() => {
     return false;
   }
 })();
-const PUBLIC_SHARE_URL = 'https://dx100-sound-detective.netlify.app/';
+const PUBLIC_SHARE_URL = (() => {
+  const origin = window.location.origin || '';
+  return origin && /^https?:/i.test(window.location.protocol) ? `${origin}/` : 'https://sound-detective.pages.dev/';
+})();
 const DEVICE_COOKIE_NAME = 'voiceDetectiveDeviceId';
 const USER_COOKIE_NAME = 'voiceDetectiveUserId';
 const NAME_COOKIE_NAME = 'voiceDetectiveName';
+const FEEDBACK_ENDPOINT = 'https://dx-game-admin.pages.dev/api/feedback';
 const CHANGELOG = [
+  {
+    version: '0.2.012-20260821',
+    items: [
+      'Cloudflare Pages 直接承载游戏 API、语音 WebSocket、KV 和 R2，不再依赖同名独立 Worker。',
+      '发布链路收敛为本地 Wrangler Direct Upload，GitHub 仅作为可选私有源码备份。'
+    ]
+  },
+  {
+    version: '0.2.011-20260821',
+    items: [
+      '百度实时识别升级到新版 dev_pid 15372，旧离线识别参数不再覆盖实时接口。',
+      '百度探活按官方 160ms 音频分帧执行，并用 HEARTBEAT 和错误码区分服务可用性。'
+    ]
+  },
+  {
+    version: '0.2.010-20260821',
+    items: [
+      '首页自动探测腾讯、豆包和百度实时语音识别状态，失效线路不再参与随机分配。',
+      '探活结果由服务端短时缓存，百度错误帧和超时原因可直接诊断。'
+    ]
+  },
+  {
+    version: '0.2.009-20260821',
+    items: [
+      '听题和答题阶段统一限制在单个可视区内，提示与操作按钮无需滚动即可看到。',
+      '短屏自动压缩声音舞台，保留完整问题重听、语音字幕和重新回答入口。'
+    ]
+  },
+  {
+    version: '0.2.008-20260821',
+    items: [
+      '共享语音识别模块统一管理题目级麦克风生命周期，整轮保持预热音轨。',
+      '题目声音播放结束后直接复用已授权音轨，并记录音轨和音频上下文状态。',
+      '百度实时识别因持续超时暂时退出分流，改用共享豆包线路。'
+    ]
+  },
+  {
+    version: '0.2.007-20260821',
+    items: [
+      '共享语音识别模块新增进入题目页预热麦克风的通用方法。',
+      '游戏开始和第一题进入时统一通过共享模块申请麦克风权限。'
+    ]
+  },
+  {
+    version: '0.2.006-20260821',
+    items: [
+      '开始回合时立即预热麦克风，和说颜色保持同一套权限启动节奏。',
+      '避免题目音频播放结束后才请求麦克风，导致部分浏览器无法启动收音。'
+    ]
+  },
+  {
+    version: '0.2.005-20260821',
+    items: [
+      '答题页改为统一舞台式布局，听题、字幕和语音状态全部居中呈现。',
+      '保持原有模块数量和排序，减少线框感，让听题阶段也能撑满页面。'
+    ]
+  },
+  {
+    version: '0.2.004-20260821',
+    items: [
+      '听题和答题改为串行单通道：播放线索时隐藏语音答题、停止按钮和文字输入。',
+      '语音答题区收短状态文案，减少“等待开口”和“正在识别”的重复提示。'
+    ]
+  },
+  {
+    version: '0.2.003-20260821',
+    items: [
+      '语音识别共享模块补充 provider 兜底，旧轮次也会使用当前可用线路继续识别。',
+      '腾讯实时识别改为显式开启，签名修复前不进入随机分流。'
+    ]
+  },
+  {
+    version: '0.2.002-20260821',
+    items: [
+      '统一语音答题区域的信息层级：问题音频状态、实时字幕、识别状态和重答入口更清晰。',
+      '语音错误提示按权限、没听清、超时和接口异常归一展示，兼容豆包、腾讯、百度返回差异。'
+    ]
+  },
+  {
+    version: '0.2.001-20260820',
+    items: [
+      '语音识别接口升级为共享 ASR 模块，与说颜色保持同一套收音、VAD、实时字幕和提交机制。',
+      '保留本游戏先播放声音和文字输入答案的独立流程，版本号进入 0.2 里程碑。'
+    ]
+  },
+  {
+    version: '0.1091-20260820',
+    items: [
+      '修复 iOS Safari 下实时 ASR 已返回最终文字后，偶发停在本题不提交答案的问题。',
+      'ASR 最终文字现在会立即唤醒提交链路，并记录提交兜底埋点。'
+    ]
+  },
+  {
+    version: '0.1090-20260820',
+    items: [
+      'Cloudflare 实时语音识别加入腾讯和豆包配置。',
+      '新一轮游戏会在已配置的百度、腾讯、豆包之间随机分流，并在后台按服务统计表现。'
+    ]
+  },
+  {
+    version: '0.1089-20260820',
+    items: [
+      '答题语音链路替换为“说颜色”0.1.005-0.1.007 的实时 ASR 机制。',
+      '新增实时字幕、自动收音、VAD 智能截断，以及按 ASR 服务区分的前端埋点。'
+    ]
+  },
+  {
+    version: '0.1088-20260818',
+    items: [
+      'Cloudflare Pages 的正式入口调整为 sound-detective.pages.dev。',
+      '游戏开始、文字答题、结算、排名和用户记录接口改为 Cloudflare 轻量热路径，减少 1101/1102 超限错误。'
+    ]
+  },
+  {
+    version: '0.1087-20260818',
+    items: [
+      '新增 Cloudflare Pages 生产入口 sound-detective.pages.dev。',
+      'Pages 负责公开域名和静态页面，动态接口通过 Cloudflare 服务绑定转发到现有 Worker。'
+    ]
+  },
+  {
+    version: '0.1086-20260818',
+    items: [
+      '后台页面、后台接口和后台脚本统一禁用缓存，减少旧脚本继续解析 HTML 错误页。',
+      'Cloudflare 新增 /admin、/admin/users、/admin/analytics 和 /admin/tags 后台入口别名。'
+    ]
+  },
+  {
+    version: '0.1085-20260818',
+    items: [
+      'Cloudflare 后台列表、用户记录和分析接口改为轻量 JSON 直出，减少资源超限导致的 HTML 错误页。',
+      '后台前端增强接口解析错误提示，避免显示浏览器原始 JSON 解析异常。'
+    ]
+  },
+  {
+    version: '0.1084-20260818',
+    items: [
+      '后台改为公开访问 /admin.html，页面支架和后台内部导航可直接跳转。',
+      'Cloudflare 后台 API 不再依赖隐藏入口 cookie，避免后台页面有壳但无内容。'
+    ]
+  },
+  {
+    version: '0.1083-20260818',
+    items: [
+      'Cloudflare 首页、静态资源、后台壳页面和声音文件改为轻量直出，修复 1102 资源超限访问错误。',
+      'Cloudflare API 请求仍保留线上数据读取，页面打开不再先加载完整游戏记录。'
+    ]
+  },
+  {
+    version: '0.1082-20260818',
+    items: [
+      'Cloudflare 排名接口会先合并线上分段记录，再按答对题目总分排序。',
+      'Cloudflare 版本的当前用户可通过用户名匹配旧记录，切换域名后更容易找回过往成绩。'
+    ]
+  },
+  {
+    version: '0.1081-20260818',
+    items: [
+      'Cloudflare 版本的过往成绩可按当前输入的用户名找回旧记录。',
+      '首页排名弹窗改为读取更多历史排名，避免只显示前 10 名。'
+    ]
+  },
+  {
+    version: '0.1080-20260818',
+    items: [
+      '新增 Cloudflare Workers 部署路径，接口、前端和声音素材可部署到 Cloudflare。',
+      '分享链接改为当前站点自动生成，避免云端切换后仍指向旧域名。'
+    ]
+  },
   {
     version: '0.1079-20260814',
     items: [
@@ -663,6 +836,12 @@ let currentPageId = 'welcome';
 let lastPageExitAt = 0;
 let roundStartedAt = 0;
 let libraryStartedAt = Number(storageGet('libraryStartedAt') || 0) || 0;
+let asrConfig = null;
+let asrConfigPromise = null;
+let sharedVoiceAsr = null;
+let voiceAutoStartTimer;
+let voiceUploading = false;
+let asrAttemptId = '';
 
 function makeId() {
   if (window.crypto && typeof window.crypto.randomUUID === 'function') {
@@ -871,6 +1050,8 @@ function analyticsPayload(type, details = {}) {
     details: {
       ...currentQuestionContext(),
       testMode: TEST_MODE,
+      asrProvider: details.asrProvider || game?.asrProvider || '',
+      asrAttemptId: details.asrAttemptId || asrAttemptId || '',
       ...details
     }
   };
@@ -1011,31 +1192,27 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') trackPageExit();
 });
 
-async function share(button = null) {
-  if (!beginAction('share-link', 2000, '分享处理中，请稍候')) return;
-  setButtonBusy(button, true, '正在分享...');
-  const url = PUBLIC_SHARE_URL;
+function setFeedbackOpen(open) {
+  $('#feedbackModal')?.classList.toggle('hidden', !open);
+  if (open) $('#feedbackContent').value = '';
+}
+
+async function submitFeedback(event) {
+  event.preventDefault();
+  const content = String($('#feedbackContent')?.value || '').trim();
+  if (!content) return;
+  const button = $('#feedbackSubmit');
+  setButtonBusy(button, true, '正在提交...');
   try {
-    if (navigator.share) {
-      await navigator.share({ title: '声音侦探', text: '来玩声音侦探，听声音判断物品或场景！', url });
-    } else if (navigator.clipboard && navigator.clipboard.writeText) {
-      await navigator.clipboard.writeText(url);
-      toast('链接已复制，快去分享吧！');
-    } else {
-      const input = document.createElement('input');
-      input.value = url;
-      input.style.position = 'fixed';
-      input.style.opacity = '0';
-      document.body.appendChild(input);
-      input.select();
-      document.execCommand('copy');
-      document.body.removeChild(input);
-      toast('链接已复制，快去分享吧！');
-    }
-  } catch (e) {
-  } finally {
+    const response = await fetch(FEEDBACK_ENDPOINT, { method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ gameId:'sound', userId:user?.id || rememberedUserId(), deviceId, userName:user?.name || rememberedName(), content }) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw Error(data.error || '提交失败');
+    setFeedbackOpen(false);
+    toast('反馈已提交，谢谢你');
+    trackAnalytics('feedback_submit');
+  } catch (error) { toast(error.message || '反馈提交失败，请稍后再试'); }
+  finally {
     setButtonBusy(button, false);
-    endAction('share-link');
   }
 }
 
@@ -1234,6 +1411,8 @@ async function openHistory(button = null) {
     const params = new URLSearchParams({ deviceId });
     const userId = user?.id || rememberedUserId();
     if (userId) params.set('userId', userId);
+    const name = cleanName($('#name')?.value || user?.name || rememberedName());
+    if (name) params.set('name', name);
     if (TEST_MODE) params.set('testMode', '1');
     const r = await fetch('/api/users/history?' + params.toString());
     const x = await r.json();
@@ -1266,9 +1445,11 @@ async function openRanking(button = null) {
   setRankingOpen(true);
   try {
     deviceId = deviceId || getDeviceId();
-    const params = new URLSearchParams({ deviceId, limit: '10' });
+    const params = new URLSearchParams({ deviceId, limit: '50' });
     const userId = user?.id || rememberedUserId();
     if (userId) params.set('userId', userId);
+    const name = cleanName($('#name')?.value || user?.name || rememberedName());
+    if (name) params.set('name', name);
     if (TEST_MODE) params.set('testMode', '1');
     const r = await fetch('/api/rankings?' + params.toString());
     const x = await r.json();
@@ -1277,7 +1458,7 @@ async function openRanking(button = null) {
       user = x.user;
       rememberUserIdentity(user);
     }
-    renderRanking('#homeRanking', x.ranking || [], { currentUser: x.user || user, limit: 10 });
+    renderRanking('#homeRanking', x.ranking || [], { currentUser: x.user || user, limit: 50 });
     trackAnalytics('ranking_opened', { count: Array.isArray(x.ranking) ? x.ranking.length : 0 });
   } catch (e) {
     if (target) target.innerHTML = `<p class="empty-note">${escapeHtml(e.message || '读取失败，请稍后再试')}</p>`;
@@ -1316,6 +1497,11 @@ function addClientEvent(type, message, details = {}, postToServer = false) {
     'audio_only_queued',
     'audio_only_received',
     'audio_only_missing',
+    'asr_config_error',
+    'asr_connect_started',
+    'asr_ready',
+    'asr_error',
+    'asr_retry',
     'speech_started',
     'speech_recognized',
     'speech_error',
@@ -1341,6 +1527,230 @@ async function postMonitorEvent(type, message, details = {}) {
   } catch (e) {
     addClientEvent('monitor_post_failed', '监控事件未能写入后端', { type });
   }
+}
+
+function assignedAsrConfig() {
+  return sharedVoiceAsr?.assignedAsrConfig() || asrConfig?.realtime?.providers?.find(item => item.provider === game?.asrProvider) || null;
+}
+
+function realtimeText() {
+  return String(sharedVoiceAsr?.realtimeText() || '').trim();
+}
+
+function asrProviderLabel() {
+  return game?.asrProviderLabel || assignedAsrConfig()?.label || '实时语音识别';
+}
+
+function setVoiceState(mode, status, detail = '') {
+  const dock = $('#answerDock');
+  if (dock) dock.className = `answer-dock ${mode}`;
+  const statusEl = $('#listeningStatus');
+  if (statusEl) statusEl.textContent = status || '';
+  const supportEl = $('#voiceSupport');
+  if (supportEl) supportEl.textContent = detail || '';
+  const stopButton = $('#stopAnswerButton');
+  if (stopButton) stopButton.classList.toggle('hidden', mode !== 'listening');
+  const retryButton = $('#retryAnswerButton');
+  if (retryButton) retryButton.classList.toggle('hidden', mode !== 'error');
+  if (mode !== 'listening') {
+    $$('.listening-indicator i').forEach(bar => {
+      bar.style.transform = '';
+    });
+  }
+}
+
+function setAnswerPhase(active, { showTextSwitch = true } = {}) {
+  const area = document.querySelector('.answer-area');
+  if (area) area.hidden = !active;
+  document.querySelector('#quiz')?.classList.toggle('answer-mode', Boolean(active));
+  if (!active) {
+    $('#textAnswer')?.classList.add('hidden');
+    $('#switch')?.classList.add('hidden');
+    return;
+  }
+  $('#switch')?.classList.toggle('hidden', !showTextSwitch);
+}
+
+function renderSpeechCaption(text = '', mode = 'waiting', placeholder = '等待你开口') {
+  const caption = $('#speechCaption');
+  const output = $('#recognitionText');
+  if (!caption || !output) return;
+  const value = String(text || '').trim().slice(0, 120);
+  const previous = output.dataset.text || '';
+  let stableLength = 0;
+  while (stableLength < value.length && stableLength < previous.length && value[stableLength] === previous[stableLength]) {
+    stableLength += 1;
+  }
+  caption.className = `speech-caption ${mode}`;
+  output.className = `recognition-text${value ? '' : ' placeholder'}`;
+  output.replaceChildren();
+  output.dataset.text = value;
+  if (!value) {
+    output.textContent = placeholder;
+    return;
+  }
+  [...value].forEach((char, charIndex) => {
+    const element = document.createElement('span');
+    element.textContent = char;
+    element.className = charIndex >= stableLength ? 'caption-char incoming' : 'caption-char';
+    if (charIndex >= stableLength) element.style.animationDelay = `${Math.min((charIndex - stableLength) * 34, 170)}ms`;
+    output.appendChild(element);
+  });
+}
+
+
+function syncSharedVoiceState(snapshot) {
+  recording = Boolean(snapshot.recording);
+  startingRecord = Boolean(snapshot.starting);
+  voiceUploading = Boolean(snapshot.uploading);
+  if (snapshot.asrAttemptId) asrAttemptId = snapshot.asrAttemptId;
+}
+
+function sharedVoiceEvent(type, details = {}, message = '') {
+  const payload = { ...currentQuestionContext(), ...details };
+  const labels = {
+    asr_connect_started: '实时语音识别开始连接',
+    asr_ready: '实时语音识别已就绪',
+    asr_error: message || '实时语音识别失败',
+    asr_retry: '用户重新回答本题',
+    record_started: '自动语音答题已开始',
+    answer_response: '前端已收到后端语音判断响应',
+    answer_error: '语音判断提交失败',
+    mic_error: '自动语音答题启动失败',
+    pcm_capture_error: 'PCM 实时采集启动失败',
+    backup_capture_error: '备用录音采集启动失败'
+  };
+  if (labels[type]) addClientEvent(type, labels[type], payload, true);
+  trackAnalytics(type, payload);
+}
+
+function ensureSharedVoiceAsr() {
+  if (sharedVoiceAsr) return sharedVoiceAsr;
+  sharedVoiceAsr = new VoiceAsrClient({
+    version: () => APP_VERSION,
+    workletUrl: '/public/pcm-worklet.js',
+    provider: () => game?.asrProvider || '',
+    providerLabel: () => game?.asrProviderLabel || '',
+    currentQuestion: () => game?.questions?.[index] || null,
+    eventDetails: sound => ({ soundId: sound?.id || '' }),
+    questionKey: sound => sound?.id || '',
+    isStale: sound => !game || game.questions?.[index]?.id !== sound?.id,
+    startPayload: sound => ({ type: 'START', sessionId: game.sessionId, soundId: sound.id, questionId: sound.id, deviceId }),
+    shouldAutoSubmit: transcript => Boolean(String(transcript || '').trim()),
+    finalSubmitDelayMs: 0,
+    retryDetail: '请重新回答',
+    onStateChange: syncSharedVoiceState,
+    onEvent: sharedVoiceEvent,
+    submitTranscript: ({ question, transcript, durationMs, provider }) => api('/api/game/answer-text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sessionId: game.sessionId,
+        soundId: question.id,
+        questionId: question.id,
+        transcript,
+        provider,
+        asrDurationMs: durationMs,
+        testMode: TEST_MODE
+      })
+    }),
+    submitAudioFallback: ({ question, blob, durationMs }) => uploadVoiceFallback(blob, durationMs, question),
+    onSuccess: async () => {
+      playFeedbackTone('end');
+      await goNext();
+    },
+    onError: (error, context) => {
+      playFeedbackTone('fail');
+      if (context.phase === 'start') toast(error?.name === 'NotAllowedError' ? '请允许使用麦克风后再试' : error?.message || '无法打开麦克风');
+      else toast(error.message || '识别失败，请再试一次');
+    },
+    voiceErrorMessage: message => /没有识别到|答案/.test(String(message || '')) ? '没有听到有效答案' : '语音识别暂时不可用'
+  });
+  if (asrConfig) sharedVoiceAsr.setAsrConfig(asrConfig);
+  return sharedVoiceAsr;
+}
+
+function resetVoiceAnswerState(message = '') {
+  ensureSharedVoiceAsr().resetUi(message, '等待你开口');
+}
+function loadAsrConfig() {
+  if (asrConfigPromise) return asrConfigPromise;
+  asrConfigPromise = fetch(`/api/asr/config?t=${Date.now()}`, { cache: 'no-store', headers: { Accept: 'application/json' } })
+    .then(async response => {
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw Error(data?.error || '语音识别配置读取失败');
+      const client = ensureSharedVoiceAsr();
+      client.setAsrConfig(data);
+      await client.checkProviderHealth();
+      asrConfig = client.asrConfig;
+      return asrConfig;
+    })
+    .catch(error => {
+      asrConfig = null;
+      ensureSharedVoiceAsr().setAsrConfig(null);
+      addClientEvent('asr_config_error', '实时语音识别配置读取失败', { error: error.message || String(error) });
+      return null;
+    })
+    .finally(() => {
+      asrConfigPromise = null;
+    });
+  return asrConfigPromise;
+}
+
+function releaseRoundMic() {
+  ensureSharedVoiceAsr().release();
+  recording = false;
+  startingRecord = false;
+  finishingRecord = false;
+}
+
+async function prepareRoundMic() {
+  await ensureSharedVoiceAsr().prewarmMicForQuestion(null, { reason: 'round-start', updateUi: false });
+}
+
+async function startAutoListening(reason = 'auto-after-playback') {
+  const sound = game?.questions?.[index];
+  return ensureSharedVoiceAsr().start(sound, { reason });
+}
+
+function stopAutoCapture(cancelSocket = false) {
+  ensureSharedVoiceAsr().stopCapture(cancelSocket);
+}
+
+function handleListeningError(error) {
+  ensureSharedVoiceAsr().handleError(error);
+}
+
+async function retryCurrentQuestion() {
+  await ensureSharedVoiceAsr().retry(game?.questions?.[index] || null);
+}
+async function uploadVoiceFallback(blob, durationMs, sound) {
+  const form = new FormData();
+  form.append('sessionId', game.sessionId);
+  form.append('soundId', sound.id);
+  form.append('durationMs', String(durationMs));
+  form.append('sampleRate', blob.type === 'audio/wav' ? '16000' : '0');
+  form.append('testMode', TEST_MODE ? '1' : '');
+  form.append('file', blob, `answer-${Date.now()}${audioFileExtension(blob.type)}`);
+  const response = await fetch('/api/game/audio-check', { method: 'POST', body: form });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) throw Error(payload.error || '语音兜底识别失败');
+  return payload;
+}
+
+async function stopRecording(reason = 'manual') {
+  await ensureSharedVoiceAsr().stop(reason);
+}
+function startListeningAfterPlayback(q, reason = 'audio-ended') {
+  if (!q || !game || game.questions[index]?.id !== q.id) return;
+  if (recording || voiceUploading) return;
+  clearTimeout(voiceAutoStartTimer);
+  setAnswerPhase(true);
+  setVoiceState('preparing', '准备中', '');
+  renderSpeechCaption('', 'waiting', '正在准备');
+  voiceAutoStartTimer = setTimeout(() => {
+    startAutoListening(reason).catch(handleListeningError);
+  }, 220);
 }
 
 function setStartLoading(loading) {
@@ -1378,6 +1788,7 @@ function isDuplicateAnswerError(e) {
 
 function recoverStaleGameState(message = '本轮状态已失效，请重新开始') {
   clearSoundCache();
+  releaseRoundMic();
   clearRecordStopTimer();
   clearTimeout(audioProbeUploadTimer);
   audioProbeUploadTimer = null;
@@ -1409,7 +1820,6 @@ async function handleStart(e) {
       libraryStartedAt = Date.now();
       storageSet('libraryStartedAt', String(libraryStartedAt));
     }
-    await createOrRefreshUser();
     await startGame();
     trackAnalytics('start_success', { userId: user.id });
   } catch (e) {
@@ -1438,11 +1848,15 @@ function bindStartEvents() {
 }
 
 async function startGame() {
+  await prepareRoundMic();
+  await loadAsrConfig();
+  const availableAsrProviders = ensureSharedVoiceAsr().healthyProviderIds();
+  if (!availableAsrProviders.length) throw Error('当前没有可用的实时语音识别服务');
   if (!user || !user.id) await createOrRefreshUser();
   const actionKey = `game-start:${user?.id || deviceId || 'anonymous'}`;
   if (!beginAction(actionKey, 1800, '正在进入下一轮，请稍候')) return null;
   try {
-    const startPayload = () => JSON.stringify({ userId: user.id, deviceId, name: playerName(), testMode: TEST_MODE, ...clientPayload() });
+    const startPayload = () => JSON.stringify({ userId: user.id, deviceId, name: playerName(), testMode: TEST_MODE, availableAsrProviders, ...clientPayload() });
     let nextGame;
     try {
       nextGame = await api('/api/game/start', {
@@ -1471,8 +1885,8 @@ async function startGame() {
     index = 0;
     roundStartedAt = Date.now();
     clearSoundCache();
-    addClientEvent('game_started', '前端已收到后端题目', { sessionId: game.sessionId, questionCount: game.questions.length }, true);
-    trackAnalytics('game_started', { sessionId: game.sessionId, questionCount: game.questions.length, playthrough: game.playthrough || 1 });
+    addClientEvent('game_started', '前端已收到后端题目', { sessionId: game.sessionId, questionCount: game.questions.length, asrProvider: game.asrProvider || '', asrProviderLabel: game.asrProviderLabel || '' }, true);
+    trackAnalytics('game_started', { sessionId: game.sessionId, questionCount: game.questions.length, playthrough: game.playthrough || 1, asrProvider: game.asrProvider || '' });
     show('#quiz');
     renderQuestion();
     return nextGame;
@@ -1482,6 +1896,7 @@ async function startGame() {
 }
 
 function clearSoundCache() {
+  stopAutoCapture(true);
   clearTimeout(audioPlayConfirmTimer);
   clearPlaybackConfirmation();
   audioPlayPendingSoundId = '';
@@ -1509,8 +1924,9 @@ function renderQuestion() {
   $('#steps').innerHTML = game.questions.map((_, i) => `<i class="step ${i <= index ? 'on' : ''}"></i>`).join('');
   $('#answerText').value = '';
   $('#textAnswer').classList.add('hidden');
-  $('#switch').classList.remove('hidden');
-  resetRecordButton();
+  setAnswerPhase(false);
+  ensureSharedVoiceAsr().enterQuestion(q, { reason: 'question-enter', updateUi: false }).catch(handleListeningError);
+  resetVoiceAnswerState('');
   showQuestionCue(current, total);
   addClientEvent('question_rendered', '前端进入新题', { index: current, soundId: q.id }, true);
   trackAnalytics('question_rendered', { index: current, total, soundId: q.id });
@@ -1544,12 +1960,11 @@ function preloadUpcomingSounds(fromIndex = index) {
 }
 
 function setPlaybackNotice(text, tone = 'normal') {
-  const message = text || '准备播放声音';
-  const notice = $('#playbackNotice');
-  if (notice) {
-    notice.textContent = message;
-    notice.className = `playback-notice notice-${tone}`;
-  }
+  const message = text || '准备播放';
+  const compactNotice = $('#playbackControlText');
+  if (compactNotice) compactNotice.textContent = message;
+  const control = document.querySelector('.playback-control');
+  if (control) control.className = `playback-control playback-${tone}`;
   const stageText = $('#soundStageText');
   if (stageText) stageText.textContent = message;
 }
@@ -1573,7 +1988,7 @@ function showQuestionCue(current, total) {
     cue.classList.add('cue-pop');
   }
   if (stageBadge) stageBadge.textContent = `第 ${current} 题`;
-  setPlaybackNotice(current === 1 ? '声音线索正在准备' : '新的声音线索正在加载', 'loading');
+  setPlaybackNotice('准备播放', 'loading');
   setReplayButtonLabel('replay');
   if (stage) {
     stage.classList.remove('stage-shift', 'audio-playing', 'audio-loading', 'audio-needs-action');
@@ -1597,7 +2012,8 @@ function markPlaybackNeedsAction(q, token, auto) {
   const replay = $('#replay');
   if (stage) stage.classList.remove('audio-loading', 'audio-playing');
   if (stage) stage.classList.add('audio-needs-action');
-  setPlaybackNotice('没有确认声音已播放，请点再听一次', 'warning');
+  setPlaybackNotice('点再听一次播放', 'warning');
+  setAnswerPhase(false);
   setReplayButtonLabel('play');
   if (replay) replay.classList.add('attention');
   addClientEvent('audio_play_unconfirmed', '浏览器没有确认题目声音开始播放', { soundId: q.id, auto: Boolean(auto), waitMs: Date.now() - audioPlayPendingAt }, true);
@@ -1663,7 +2079,8 @@ function markPlaybackConfirmed(q, token, currentAudio) {
   if (stage) stage.classList.add('audio-playing');
   setReplayButtonLabel('replay');
   if (replay) replay.classList.remove('attention');
-  setPlaybackNotice('请仔细听，判断它来自什么物品或场景', 'playing');
+  setPlaybackNotice('播放中', 'playing');
+  setAnswerPhase(false);
   addClientEvent('audio_playing', '题目声音已开始播放', { soundId: q.id, sinkId: currentAudio.sinkId || 'system-default' }, true);
   trackAnalytics('audio_playing', { soundId: q.id, sinkId: currentAudio.sinkId || 'system-default' });
   return true;
@@ -1671,7 +2088,7 @@ function markPlaybackConfirmed(q, token, currentAudio) {
 
 function play(q = game.questions[index], options = {}) {
   if (!q) return;
-  if (recording || startingRecord) return toast('判断时先不要播放声音');
+  if (recording || startingRecord || voiceUploading) return toast('判断时先不要播放声音');
   const now = Date.now();
   const actionKey = `audio-play:${playbackKey(q)}`;
   const cooldownMs = options.manual ? 1300 : 550;
@@ -1689,7 +2106,8 @@ function play(q = game.questions[index], options = {}) {
   if (stage) stage.classList.remove('audio-playing', 'audio-needs-action');
   if (stage) stage.classList.add('audio-loading');
   if (replay) replay.classList.remove('attention');
-  setPlaybackNotice('正在加载声音线索', 'loading');
+  setPlaybackNotice('加载中', 'loading');
+  setAnswerPhase(false);
   if (audio) {
     gameAudioVolume = audio.volume;
     audio.pause();
@@ -1727,7 +2145,8 @@ function play(q = game.questions[index], options = {}) {
         if (stage) stage.classList.add('audio-needs-action');
         setReplayButtonLabel('play');
         if (replay) replay.classList.add('attention');
-        setPlaybackNotice('自动播放被浏览器拦截，请点再听一次', 'warning');
+        setPlaybackNotice('点再听一次播放', 'warning');
+        setAnswerPhase(false);
         addClientEvent('audio_play_failed', '题目声音播放失败', { soundId: q.id, error: e.message || String(e), auto: Boolean(options.auto) }, true);
         trackAnalytics('audio_play_failed', { soundId: q.id, auto: Boolean(options.auto), error: e.message || String(e) });
         toast('请点击“再听一次”播放声音');
@@ -1736,12 +2155,19 @@ function play(q = game.questions[index], options = {}) {
   currentAudio.onended = () => {
     if (token !== audioPlayToken || game.questions[index]?.id !== q.id) return;
     if (stage) stage.classList.remove('audio-playing');
-    setPlaybackNotice('听完了，请说出你的判断', 'ready');
+    setPlaybackNotice('请回答', 'ready');
+    startListeningAfterPlayback(q, options.manual ? 'manual-replay-ended' : 'auto-play-ended');
   };
   sinkPromise.then(playNow, playNow);
 }
 
 function showTextAnswer(message, focusInput = false) {
+  if (voiceUploading) return toast('语音正在确认，请稍候');
+  setAnswerPhase(true, { showTextSwitch: false });
+  if (recording) stopAutoCapture(true);
+  voiceUploading = false;
+  setVoiceState('preparing', '文字输入', '已切换为手动输入');
+  renderSpeechCaption('', 'waiting', '已切换为文字输入');
   $('#textAnswer').classList.remove('hidden');
   $('#switch').classList.add('hidden');
   if (focusInput) $('#answerText').focus();
@@ -1750,6 +2176,7 @@ function showTextAnswer(message, focusInput = false) {
 
 function suggestTextAnswer(message) {
   if (message) toast(message);
+  if (document.querySelector('.answer-area')?.hidden) return;
   $('#switch').classList.remove('hidden');
   $('#textAnswer').classList.add('hidden');
 }
@@ -1871,13 +2298,18 @@ function resetRecordButton() {
   startingRecord = false;
   finishingRecord = false;
   recordStartedAt = 0;
-  $('#record').textContent = '说出你的判断';
-  $('#record').classList.remove('recording');
+  const button = $('#record');
+  if (button) {
+    button.textContent = '说出你的判断';
+    button.classList.remove('recording');
+  }
 }
 
 function setRecordButton(text) {
-  $('#record').textContent = text;
-  $('#record').classList.add('recording');
+  const button = $('#record');
+  if (!button) return;
+  button.textContent = text;
+  button.classList.add('recording');
 }
 
 function pauseQuestionAudioForRecording() {
@@ -2523,6 +2955,7 @@ async function result() {
   const actionKey = `round-result:${game?.sessionId || 'no-session'}`;
   if (!beginAction(actionKey, 1200)) return null;
   try {
+    releaseRoundMic();
     toast('正在整理本轮成绩...');
     const r = await api('/api/game/result/' + game.sessionId);
     addClientEvent('result_response', '前端已收到结算结果', { score: r.score ?? r.correct, correct: r.correct }, true);
@@ -2640,6 +3073,8 @@ function bindUiEvents() {
   const modeSwitch = $('#switch');
   const submitText = $('#submitText');
   const answerText = $('#answerText');
+  const stopAnswerButton = $('#stopAnswerButton');
+  const retryAnswerButton = $('#retryAnswerButton');
   const next = $('#next');
   const again = $('#again');
   const completeAgain = $('#completeAgain');
@@ -2661,15 +3096,27 @@ function bindUiEvents() {
   };
   if (rankingClose) rankingClose.onclick = () => setRankingOpen(false);
   if (rankingBackdrop) rankingBackdrop.onclick = () => setRankingOpen(false);
-  $$('[data-share]').forEach(x => x.onclick = e => {
+  $$('[data-feedback]').forEach(x => x.onclick = e => {
     e.preventDefault();
-    share(e.currentTarget);
+    setFeedbackOpen(true);
   });
+  $('#feedbackClose').onclick = () => setFeedbackOpen(false);
+  $('#feedbackBackdrop').onclick = () => setFeedbackOpen(false);
+  $('#feedbackForm').onsubmit = submitFeedback;
   bindStartEvents();
-  bindRecordEvents();
   if (replay) replay.onclick = e => {
     e.preventDefault();
     play(game?.questions?.[index], { manual: true, force: true });
+  };
+  if (stopAnswerButton) stopAnswerButton.onclick = e => {
+    e.preventDefault();
+    addClientEvent('record_stop_click', '用户点击停止并提交', currentQuestionContext(), true);
+    trackAnalytics('record_stop_click', currentQuestionContext());
+    stopRecording('manual-stop');
+  };
+  if (retryAnswerButton) retryAnswerButton.onclick = e => {
+    e.preventDefault();
+    retryCurrentQuestion();
   };
   if (modeSwitch) modeSwitch.onclick = () => {
     if (noteAction('text-mode', 500)) showTextAnswer('', true);
@@ -2714,6 +3161,8 @@ function init() {
     renderChangelog();
     bindUiEvents();
     loadRememberedUser();
+    loadAsrConfig();
+    window.addEventListener('pagehide', releaseRoundMic);
   } catch (e) {
     showStartupError(e);
   }

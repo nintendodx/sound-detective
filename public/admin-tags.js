@@ -14,8 +14,17 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({
 }[c]));
 
 async function api(url, opts = {}) {
-  const r = await fetch(url, opts);
-  const x = await r.json();
+  const headers = new Headers(opts.headers || {});
+  if (!headers.has('Accept')) headers.set('Accept', 'application/json');
+  const r = await fetch(url, { ...opts, headers, cache: 'no-store' });
+  const text = await r.text();
+  let x = {};
+  try {
+    x = text ? JSON.parse(text) : {};
+  } catch {
+    const type = r.headers.get('content-type') || '未知类型';
+    throw Error(`后台接口返回了非 JSON 内容（HTTP ${r.status}，${type}）`);
+  }
   if (!r.ok) throw Error(x.error || '操作失败');
   return x;
 }

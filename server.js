@@ -4,20 +4,39 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const os = require('node:os');
 const childProcess = require('node:child_process');
+const zlib = require('node:zlib');
 const { AsyncLocalStorage } = require('node:async_hooks');
+let WebSocket = globalThis.WebSocket;
+let WebSocketServer = null;
+try {
+  const ws = require('ws');
+  WebSocket = ws.WebSocket || WebSocket;
+  WebSocketServer = ws.WebSocketServer || null;
+} catch {}
+const { createNodeAsrToolkit } = require('./shared/asr-node.cjs');
 
-const ROOT = __dirname;
+const ROOT = typeof __dirname === 'string' ? __dirname : (globalThis.__DX100_ROOT || '.');
 loadEnvFile(ROOT);
-const STORE = path.join(ROOT, 'data', 'store.json');
+const DOWNLOADS_ROOT = path.resolve(ROOT, '..');
+const UNIFIED_ADMIN_ROOT = path.join(DOWNLOADS_ROOT, 'text color');
+loadEnvFile(UNIFIED_ADMIN_ROOT);
+const DEFAULT_DATA_ROOT = fs.existsSync(UNIFIED_ADMIN_ROOT)
+  ? path.join(UNIFIED_ADMIN_ROOT, 'data', 'admin-hub-source', 'sound', 'data')
+  : path.join(ROOT, 'data');
+const DATA_ROOT = envValue('DX100_DATA_ROOT') ? path.resolve(envValue('DX100_DATA_ROOT')) : DEFAULT_DATA_ROOT;
+const STORE = path.join(DATA_ROOT, 'store.json');
 const UPLOADS = path.join(ROOT, 'uploads');
-const ASR_RECORDINGS = path.join(ROOT, 'data', 'asr-recordings');
+const ASR_RECORDINGS = path.join(DATA_ROOT, 'asr-recordings');
 const ASR_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 const ANALYTICS_MAX_EVENTS = 50000;
 const BAIDU_TOKEN_SKEW_MS = 5 * 60 * 1000;
+const asrToolkit = createNodeAsrToolkit({ crypto, zlib, WebSocket, WebSocketServer, defaultCuid:'voice-detective-demo', envValue });
+const ASR_PROVIDER_LABELS = Object.freeze(asrToolkit.labels);
 const CLOUD_CONTEXT = new AsyncLocalStorage();
 const PORT = Number(envValue('PORT') || 3000);
-const PUBLIC_MODE = envFlag('PUBLIC_MODE') || isNetlifyRuntime();
+const PUBLIC_MODE = envFlag('PUBLIC_MODE');
 const MIME = { '.html':'text/html; charset=utf-8', '.js':'application/javascript; charset=utf-8', '.css':'text/css; charset=utf-8', '.json':'application/json; charset=utf-8', '.mp3':'audio/mpeg', '.wav':'audio/wav', '.m4a':'audio/mp4', '.ogg':'audio/ogg', '.webm':'audio/webm', '.jpg':'image/jpeg', '.jpeg':'image/jpeg', '.png':'image/png', '.svg':'image/svg+xml; charset=utf-8' };
+const NO_STORE_HEADERS = {'Cache-Control':'no-store, no-cache, must-revalidate, max-age=0', Pragma:'no-cache', Expires:'0'};
 let baiduTokenCache = null;
 const TEST_USERS = new Map();
 const TEST_SESSIONS = new Map();
@@ -27,8 +46,14 @@ const AUDIO_ANSWER_JOBS = new Map();
 
 function loadEnvFile(root) {
   const file = path.join(root, '.env');
-  if (!fs.existsSync(file)) return;
-  for (const raw of fs.readFileSync(file, 'utf8').split(/\r?\n/)) {
+  let text = '';
+  try {
+    if (!fs.existsSync(file)) return;
+    text = fs.readFileSync(file, 'utf8');
+  } catch {
+    return;
+  }
+  for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith('#')) continue;
     const idx = line.indexOf('=');
@@ -42,17 +67,10 @@ function loadEnvFile(root) {
   }
 }
 function envValue(key, fallback='') {
-  try {
-    const value=globalThis.Netlify?.env?.get?.(key);
-    if(value!==undefined&&value!==null&&String(value)!=='') return value;
-  } catch {}
   return process.env[key] ?? fallback;
 }
 function envFlag(key) {
   return truthy(envValue(key));
-}
-function isNetlifyRuntime() {
-  return envValue('NETLIFY')==='true'||envValue('DX100_STORAGE')==='netlify-blobs';
 }
 function activeCloudContext() {
   return CLOUD_CONTEXT.getStore()||null;
@@ -61,7 +79,7 @@ function isCloudRuntime() {
   return Boolean(activeCloudContext());
 }
 async function withCloudRequest(store, fn) {
-  if(!store) throw Error('缺少 Netlify Blobs store');
+  if(!store) throw Error('缺少云端数据存储');
   const remote=await store.get('store.json',{type:'json'});
   const data=remote&&typeof remote==='object' ? remote : seed();
   let dirty=false;
@@ -1571,6 +1589,8 @@ function adminAnswerRecord(soundId, sound, answer, index) {
     answeredAt:answer?.at||'',
     inputMode:answer?.recovered ? 'recovered' : (answer?.inputMode||''),
     recognized:answer ? answer.recognized!==false : false,
+    provider:answer?.provider||answer?.asrProvider||'',
+    asrDurationMs:Number(answer?.asrDurationMs||0)||0,
     transcriptionStatus:answer?.transcriptionStatus||'',
     transcriptionReason:answer?.transcriptionReason||'',
     statusLabel:answerStatusLabel(answer)
@@ -1770,8 +1790,8 @@ function isExcludedEngineeringFile(rel) {
 }
 function engineeringCategory(rel) {
   if(rel.startsWith('public/')&&/\.(?:html|css|js)$/i.test(rel)) return '前端界面';
-  if(rel==='server.js'||rel.startsWith('netlify/functions/')) return '服务端/API';
-  if(rel.startsWith('scripts/')||rel.startsWith('docs/')||rel.startsWith('tools/')||rel==='netlify.toml'||rel==='package.json'||rel==='README.md'||rel==='DX100-声音游戏.md') return '脚本/配置';
+  if(rel==='server.js'||rel.startsWith('cloudflare/')) return '服务端/API';
+  if(rel.startsWith('scripts/')||rel.startsWith('docs/')||rel.startsWith('tools/')||rel==='wrangler.jsonc'||rel==='package.json'||rel==='README.md'||rel==='DX100-声音游戏.md') return '脚本/配置';
   return '其他工程文件';
 }
 function countEngineeringLines(text) {
@@ -1825,6 +1845,8 @@ function scanEngineeringStats(root=ROOT) {
   };
 }
 function readEngineeringManifest() {
+  const embedded=globalThis.__DX100_ENGINEERING_STATS;
+  if(embedded?.codeLines&&embedded?.fileCount) return {...embedded,source:embedded.source||'build-metrics-manifest'};
   const candidates=[
     envValue('DX100_ENGINEERING_STATS_PATH'),
     path.join(ROOT,'data','engineering-stats.json')
@@ -1842,7 +1864,7 @@ function codebaseStats() {
   let scanned=null;
   try { scanned=scanEngineeringStats(ROOT); } catch { scanned=null; }
   const manifest=readEngineeringManifest();
-  const chosen=manifest&&(!scanned||manifest.fileCount>=scanned.fileCount||isNetlifyRuntime()) ? manifest : scanned;
+  const chosen=manifest&&(!scanned||manifest.fileCount>=scanned.fileCount) ? manifest : scanned;
   return chosen||{
     source:'codebase-metrics-unavailable',
     updatedAt:new Date().toISOString(),
@@ -1893,82 +1915,28 @@ function fileMeta(file) {
   }
 }
 function teamModels() {
-  const senseVoice=fileMeta(localSenseVoiceModel());
-  const vad=fileMeta(localSenseVoiceVadModel());
-  const whisper=fileMeta(localWhisperModel());
   const cfg=sttConfig();
   return {
     updatedAt:new Date().toISOString(),
     activeSttProvider:cfg.provider,
     items:[
       {
-        stage:'工程协作',
-        model:'Codex / GPT-5',
-        version:'Codex Desktop · 2026-08-07',
-        usage:'需求理解、代码实现、调试与诊断'
-      },
-      {
-        stage:'首页视觉设计',
-        model:'Visualize plugin',
-        version:'openai-bundled visualize 1.0.19',
-        usage:'品牌字标与玩法说明图的设计方向'
-      },
-      {
-        stage:'语音转文字主链路',
-        model:'FunAudioLLM SenseVoiceSmall-GGUF',
-        version:senseVoice.file,
-        usage:`本地 ASR，当前默认启用；运行时 ${path.basename(localSenseVoiceBin())}`,
-        meta:senseVoice
-      },
-      {
-        stage:'语音活动检测',
-        model:'FunAudioLLM FSMN-VAD-GGUF',
-        version:vad.file,
-        usage:'SenseVoice 前置 VAD 分段',
-        meta:vad
-      },
-      {
-        stage:'语音转文字备用对照',
-        model:'whisper.cpp base',
-        version:whisper.file,
-        usage:'本地 Whisper 对照测试，不是默认线上链路',
-        meta:whisper
-      },
-      {
-        stage:'云端转写配置',
-        model:'OpenAI Audio Transcriptions',
-        version:envValue('OPENAI_TRANSCRIBE_MODEL')||envValue('STT_MODEL')||'gpt-4o-mini-transcribe',
-        usage:'已配置为可选云端 ASR；当前默认仍优先本地 SenseVoice'
-      },
-      {
-        stage:'云端转写配置',
-        model:'百度智能云短语音识别',
-        version:envValue('BAIDU_ASR_MODEL')||`dev_pid-${envValue('BAIDU_ASR_DEV_PID')||'80001'}`,
-        usage:`可选云端 ASR；当前 ${cfg.provider==='baidu'?'已启用':'未启用'}`
-      },
-      {
-        stage:'ASR 对比诊断',
-        model:'MiniMax ASR comparison tool',
-        version:envValue('MINIMAX_ASR_MODEL')||'未配置',
-        usage:'读取留存音频并调用可配置 MiniMax ASR endpoint，用于和当前转写结果对比'
+        stage:'语音识别',
+        model:cfg.provider==='baidu'?'百度智能云短语音识别':(envValue('OPENAI_TRANSCRIBE_MODEL')||envValue('STT_MODEL')||'实时语音识别'),
+        version:'服务端实时转写',
+        usage:'服务端代理 ASR 转写，前端只提交音频片段和题目上下文'
       },
       {
         stage:'答案判定',
         model:'本地语义规则匹配器',
         version:'v0.1017',
-        usage:'匹配重复说法、长描述和关键含义相同的表达'
+        usage:'匹配声音名称、标签和同义表达，用于判断玩家回答'
       },
       {
         stage:'题目推荐',
         model:'本地周目推荐策略',
         version:'v0.1039',
         usage:'优先未听过声音，完成后进入下一周目，并控制低正确率题分布'
-      },
-      {
-        stage:'行为统计',
-        model:'本地埋点聚合器',
-        version:'v0.1040',
-        usage:'统计访问、页面停留、录音链路、接口耗时和完成耗时'
       }
     ]
   };
@@ -2084,7 +2052,7 @@ function clientStats(data, events) {
 function recordingStatsByClient(events) {
   const groups=new Map();
   const ensure=label=>{
-    if(!groups.has(label)) groups.set(label,{client:label,recordClicks:0,recordStarted:0,micOpened:0,audioUploaded:0,transcribed:0,noText:0,errors:0,playIssues:0});
+    if(!groups.has(label)) groups.set(label,{client:label,recordClicks:0,recordStarted:0,micOpened:0,audioUploaded:0,transcribed:0,noText:0,errors:0,playIssues:0,asrReady:0,asrFinals:0});
     return groups.get(label);
   };
   for(const event of events) {
@@ -2092,19 +2060,22 @@ function recordingStatsByClient(events) {
     if(event.type==='record_click') row.recordClicks++;
     if(event.type==='record_started') row.recordStarted++;
     if(event.type==='mic_opened') row.micOpened++;
+    if(event.type==='asr_ready') row.asrReady++;
+    if(event.type==='asr_final') row.asrFinals++;
     if(event.type==='audio_probe_uploaded') row.audioUploaded++;
-    if(event.type==='audio_only_transcribed'||event.type==='speech_recognized') row.transcribed++;
-    if(event.type==='audio_only_received'||event.type==='speech_ended_empty') row.noText++;
-    if(['mic_error','speech_error','audio_probe_upload_failed','audio_probe_error','audio_probe_empty','api_error'].includes(event.type)) row.errors++;
+    if(event.type==='audio_only_transcribed'||event.type==='speech_recognized'||event.type==='asr_final') row.transcribed++;
+    if(event.type==='audio_only_received'||event.type==='speech_ended_empty'||event.type==='speech_empty') row.noText++;
+    if(['mic_error','speech_error','audio_probe_upload_failed','audio_probe_error','audio_probe_empty','api_error','asr_error','answer_error'].includes(event.type)) row.errors++;
     if(['audio_play_failed','audio_play_unconfirmed','record_blocked_audio_unconfirmed'].includes(event.type)) row.playIssues++;
   }
   return [...groups.values()]
-    .filter(row=>row.recordClicks||row.audioUploaded||row.errors||row.playIssues||row.noText)
+    .filter(row=>row.recordClicks||row.recordStarted||row.audioUploaded||row.errors||row.playIssues||row.noText||row.asrReady||row.asrFinals)
     .map(row=>({
       ...row,
       startRate:row.recordClicks?Math.round(row.recordStarted/row.recordClicks*100):0,
       uploadRate:row.recordStarted?Math.round(row.audioUploaded/row.recordStarted*100):0,
-      transcribeRate:row.audioUploaded?Math.round(row.transcribed/row.audioUploaded*100):0
+      connectRate:row.recordStarted?Math.round(row.asrReady/row.recordStarted*100):0,
+      transcribeRate:row.recordStarted?Math.round(row.transcribed/row.recordStarted*100):0
     }))
     .sort((a,b)=>(b.errors+b.playIssues+b.noText)-(a.errors+a.playIssues+a.noText)||b.recordClicks-a.recordClicks)
     .slice(0,20);
@@ -2133,7 +2104,7 @@ function audioAnswerSummary(data) {
   };
 }
 function compatibilityStats(data, events) {
-  const issueTypes=new Set(['audio_play_failed','audio_play_unconfirmed','record_blocked_audio_unconfirmed','mic_error','speech_error','audio_probe_upload_failed','audio_probe_error','audio_probe_empty','audio_only_received','speech_ended_empty','api_error']);
+  const issueTypes=new Set(['audio_play_failed','audio_play_unconfirmed','record_blocked_audio_unconfirmed','mic_error','speech_error','audio_probe_upload_failed','audio_probe_error','audio_probe_empty','audio_only_received','speech_ended_empty','api_error','asr_error','answer_error']);
   const issueEvents=events.filter(e=>issueTypes.has(e.type));
   const issueCounts=[...groupBy(issueEvents,e=>e.type)].map(([type,items])=>({type,count:items.length,latestAt:items.at(-1)?.at||''})).sort((a,b)=>b.count-a.count);
   const monitorIssueTypes=new Set(['speech_missing','audio_incomplete','audio_health_unknown','speech_empty','transcribe_failed','audio_asr_ignored','audio_answer_rejected']);
@@ -2147,6 +2118,66 @@ function compatibilityStats(data, events) {
     recentIssues:issueEvents.slice(-40).reverse(),
     recentMonitorIssues:monitorEvents.slice(-40).reverse()
   };
+}
+function ratio(part,total) {
+  return total ? Math.round(part/total*1000)/10 : 0;
+}
+function asrExperimentStats(data) {
+  const configs=realtimeProviderConfigs();
+  const sessions=(data.sessions||[]).filter(session=>session&&!isTestSession(session));
+  return Object.keys(ASR_PROVIDER_LABELS).map(provider=>{
+    const providerSessions=sessions.filter(session=>session.asrProvider===provider);
+    const sessionIds=new Set(providerSessions.map(session=>session.id));
+    const events=(data.analyticsEvents||[]).filter(event=>sessionIds.has(event.sessionId)||(event.details?.asrProvider===provider&&event.sessionId&&sessionIds.has(event.sessionId)));
+    const answers=providerSessions.flatMap(session=>(session.answers||[]).filter(answer=>(answer.provider||answer.asrProvider||provider)===provider));
+    const count=type=>events.filter(event=>event.type===type).length;
+    const values=(type,key)=>events
+      .filter(event=>event.type===type)
+      .map(event=>Number(event.details?.[key]||event.durationMs||0))
+      .filter(Number.isFinite)
+      .filter(value=>value>0);
+    const attempts=count('asr_connect_started');
+    const ready=count('asr_ready');
+    const recordStarts=count('record_started');
+    const finals=count('asr_final');
+    const retries=count('asr_retry');
+    const errors=new Set(events
+      .filter(event=>event.type==='asr_error'||event.type==='answer_error'||event.type==='mic_error')
+      .map(event=>event.details?.asrAttemptId||event.id)
+    ).size;
+    const questions=providerSessions.reduce((sum,session)=>sum+(session.soundIds||[]).length,0);
+    const correct=answers.filter(answer=>answer.correct).length;
+    const completedRounds=providerSessions.filter(session=>(session.answers||[]).length>=(session.soundIds||[]).length).length;
+    return {
+      provider,
+      label:ASR_PROVIDER_LABELS[provider],
+      configured:Boolean(configs[provider]?.enabled),
+      assignedRounds:providerSessions.length,
+      uniqueUsers:new Set(providerSessions.map(session=>session.userId).filter(Boolean)).size,
+      completedRounds,
+      completionRate:ratio(completedRounds,providerSessions.length),
+      questions,
+      answered:answers.length,
+      correct,
+      answerAccuracy:ratio(correct,answers.length),
+      connectAttempts:attempts,
+      ready,
+      connectSuccessRate:ratio(ready,attempts),
+      recordStarts,
+      finals,
+      recognitionSuccessRate:ratio(finals,recordStarts),
+      retries,
+      retryRate:ratio(retries,recordStarts),
+      errors,
+      errorRate:ratio(errors,Math.max(1,attempts||recordStarts)),
+      firstTextP50:percentile(values('asr_first_partial','firstTextMs'),.5),
+      firstTextP95:percentile(values('asr_first_partial','firstTextMs'),.95),
+      finalP50:percentile(values('asr_final','finalMs'),.5),
+      finalP95:percentile(values('asr_final','finalMs'),.95),
+      answerP50:percentile(values('answer_response','asrDurationMs'),.5),
+      answerP95:percentile(values('answer_response','asrDurationMs'),.95)
+    };
+  });
 }
 function analyticsSummary(data) {
   const events=[...(data.analyticsEvents||[])].sort((a,b)=>eventTime(a)-eventTime(b));
@@ -2181,12 +2212,17 @@ function analyticsSummary(data) {
     recordAutoStops:events.filter(e=>e.type==='record_auto_stopped').length,
     micOpened:events.filter(e=>e.type==='mic_opened').length,
     audioUploaded:events.filter(e=>e.type==='audio_probe_uploaded').length,
-    transcribed:events.filter(e=>e.type==='audio_only_transcribed'||e.type==='speech_recognized').length,
-    audioReceivedNoText:events.filter(e=>e.type==='audio_only_received'||e.type==='speech_ended_empty').length,
-    errors:events.filter(e=>['mic_error','speech_error','audio_probe_upload_failed','audio_probe_error'].includes(e.type)).length
+    asrConnectStarted:events.filter(e=>e.type==='asr_connect_started').length,
+    asrReady:events.filter(e=>e.type==='asr_ready').length,
+    asrFinals:events.filter(e=>e.type==='asr_final').length,
+    transcribed:events.filter(e=>e.type==='audio_only_transcribed'||e.type==='speech_recognized'||e.type==='asr_final').length,
+    audioReceivedNoText:events.filter(e=>e.type==='audio_only_received'||e.type==='speech_ended_empty'||e.type==='speech_empty').length,
+    errors:events.filter(e=>['mic_error','speech_error','audio_probe_upload_failed','audio_probe_error','asr_error','answer_error'].includes(e.type)).length
   };
   recording.clickToStartRate=recording.recordClicks?Math.round(recording.recordStarted/recording.recordClicks*100):0;
   recording.startToUploadRate=recording.recordStarted?Math.round(recording.audioUploaded/recording.recordStarted*100):0;
+  recording.connectSuccessRate=recording.asrConnectStarted?Math.round(recording.asrReady/recording.asrConnectStarted*100):0;
+  recording.startToTranscribedRate=recording.recordStarted?Math.round(recording.transcribed/recording.recordStarted*100):0;
   recording.uploadToTranscribedRate=recording.audioUploaded?Math.round(recording.transcribed/recording.audioUploaded*100):0;
   return {
     generatedAt:new Date().toISOString(),
@@ -2203,6 +2239,7 @@ function analyticsSummary(data) {
     p95LibraryMs:percentile(libraryDurations,.95),
     recording,
     clients:clientStats(data,events),
+    asrExperiments:asrExperimentStats(data),
     audioAnswers:audioAnswerSummary(data),
     compatibility:compatibilityStats(data,events),
     eventCounts:byType.slice(0,40),
@@ -2228,6 +2265,9 @@ function recordJudgedAnswer(data, session, sound, answer, options={}) {
     at:answeredAt,
     inputMode:options.inputMode||'text'
   };
+  if(options.provider) answerRecord.provider=String(options.provider).slice(0,80);
+  if(options.asrProvider) answerRecord.asrProvider=String(options.asrProvider).slice(0,80);
+  if(Number(options.asrDurationMs||0)>0) answerRecord.asrDurationMs=Number(options.asrDurationMs||0);
   if(options.audioAnswerId) answerRecord.audioAnswerId=String(options.audioAnswerId);
   if(options.transcriptionStatus) answerRecord.transcriptionStatus=String(options.transcriptionStatus);
   if(options.transcriptionReason) answerRecord.transcriptionReason=String(options.transcriptionReason).slice(0,200);
@@ -2339,11 +2379,17 @@ function serveLocalFile(req,res,target,headers={}) {
 async function serveFile(req, res, file, headers={}) {
   const safe=path.normalize(file).replace(/^\.\.(\/|\\|$)/,'');
   if(isCloudRuntime()) {
+    const cloud=activeCloudContext();
     const key=cloudAssetKey(safe);
     if(key) {
-      const value=await activeCloudContext().store.get(key,{type:'arrayBuffer'});
+      const value=await cloud.store.get(key,{type:'arrayBuffer'});
       if(!value) return send(res,404,{error:'未找到资源'});
       return serveBuffer(req,res,Buffer.from(value),path.basename(key),headers,'public, max-age=3600');
+    }
+    if(typeof cloud.store.fetchAsset==='function') {
+      const served=await cloud.store.fetchAsset(req,res,safe,headers);
+      if(served) return;
+      return send(res,404,{error:'未找到资源'});
     }
   }
   const target=path.join(ROOT,safe);
@@ -2353,7 +2399,7 @@ async function serveFile(req, res, file, headers={}) {
 function isAdminAssetPath(p) {
   return /^\/public\/admin(?:[-.]|$)/.test(p);
 }
-function isAdminPath(p) { return p.startsWith('/api/admin/') || ['/admin.html','/admin-users.html','/admin-tags.html','/admin-analytics.html'].includes(p) || isAdminAssetPath(p); }
+function isAdminPath(p) { return p.startsWith('/api/admin/') || ['/admin','/admin/users','/admin/tags','/admin/analytics','/admin.html','/admin-users.html','/admin-tags.html','/admin-analytics.html'].includes(p) || isAdminAssetPath(p); }
 function adminSecretPath() {
   const raw=String(envValue('ADMIN_SECRET_PATH')||envValue('DX100_ADMIN_PATH')||'').trim();
   if(!raw) return '';
@@ -2373,9 +2419,7 @@ function cookieValue(req, name) {
   return '';
 }
 function isAdminAuthorized(req) {
-  const token=adminToken();
-  if(!token) return !PUBLIC_MODE;
-  return cookieValue(req,'dx100_admin')===token||String(req.headers?.['x-dx100-admin-token']||'')===token;
+  return true;
 }
 function adminSecretFile(p) {
   const base=adminSecretPath();
@@ -2390,12 +2434,11 @@ function adminSecretFile(p) {
 function adminCookieHeader() {
   const token=adminToken();
   if(!token) return '';
-  const secure=isNetlifyRuntime()?'; Secure':'';
+  const secure=(PUBLIC_MODE||isCloudRuntime())?'; Secure':'';
   return `dx100_admin=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000${secure}`;
 }
 async function serveAdminFile(req,res,file,setCookie=false) {
-  if(!setCookie&&!isAdminAuthorized(req)) return send(res,404,{error:'未找到页面'});
-  const headers={'Cache-Control':'no-store'};
+  const headers={...NO_STORE_HEADERS};
   const cookie=setCookie?adminCookieHeader():'';
   if(cookie) headers['Set-Cookie']=cookie;
   return serveFile(req,res,file,headers);
@@ -2419,19 +2462,23 @@ async function deleteUploadFile(filename) {
 function audioExt(mime='') { const type=mime.split(';')[0].trim().toLowerCase(); return { 'audio/mp4':'.m4a', 'audio/x-m4a':'.m4a', 'audio/aac':'.aac', 'audio/mpeg':'.mp3', 'audio/mp3':'.mp3', 'audio/wav':'.wav', 'audio/x-wav':'.wav', 'audio/webm':'.webm', 'audio/ogg':'.ogg' }[type] || ''; }
 function audioFilename(file) { const ext=audioExt(file.type)||path.extname(file.filename)||'.webm'; const base=path.parse(file.filename||'answer').name.replace(/[^\w.-]/g,'').slice(0,40)||'answer'; return `${base}${ext}`; }
 function cleanupAsrRecordings(now=Date.now()) {
-  if(!fs.existsSync(ASR_RECORDINGS)) return 0;
-  const cutoff=now-ASR_RETENTION_MS;
-  let removed=0;
-  for(const name of fs.readdirSync(ASR_RECORDINGS)) {
-    const file=path.join(ASR_RECORDINGS,name);
-    let st;
-    try { st=fs.statSync(file); } catch { continue; }
-    if(st.isFile()&&st.mtimeMs<cutoff) {
-      fs.rmSync(file,{force:true});
-      removed++;
+  try {
+    if(!fs.existsSync(ASR_RECORDINGS)) return 0;
+    const cutoff=now-ASR_RETENTION_MS;
+    let removed=0;
+    for(const name of fs.readdirSync(ASR_RECORDINGS)) {
+      const file=path.join(ASR_RECORDINGS,name);
+      let st;
+      try { st=fs.statSync(file); } catch { continue; }
+      if(st.isFile()&&st.mtimeMs<cutoff) {
+        fs.rmSync(file,{force:true});
+        removed++;
+      }
     }
+    return removed;
+  } catch {
+    return 0;
   }
-  return removed;
 }
 function saveAsrRecording(file, fields, session, sound) {
   cleanupAsrRecordings();
@@ -2475,7 +2522,8 @@ function updateAsrRecording(record, patch={}) {
   fs.writeFileSync(record.metaPath,JSON.stringify(meta,null,2));
 }
 cleanupAsrRecordings();
-setInterval(cleanupAsrRecordings, 60 * 60 * 1000).unref();
+const asrCleanupTimer=setInterval(cleanupAsrRecordings, 60 * 60 * 1000);
+if(asrCleanupTimer&&typeof asrCleanupTimer.unref==='function') asrCleanupTimer.unref();
 function errorSummary(e) { return [e.message, e.cause?.code, e.cause?.hostname, e.cause?.address, e.cause?.port].filter(Boolean).join(': '); }
 function localSenseVoiceBin() { return path.resolve(ROOT, process.env.LOCAL_SENSEVOICE_BIN||'tools/sensevoice/llama-funasr-sensevoice'); }
 function localSenseVoiceModel() { return path.resolve(ROOT, process.env.LOCAL_SENSEVOICE_MODEL||'tools/sensevoice/models/sensevoice-small-q8.gguf'); }
@@ -2485,7 +2533,7 @@ function localWhisperBin() { return path.resolve(ROOT, process.env.LOCAL_WHISPER
 function localWhisperModel() { return path.resolve(ROOT, process.env.LOCAL_WHISPER_MODEL||'tools/whisper-local/models/ggml-base-q5_1.bin'); }
 function hasLocalWhisper() { return fs.existsSync(localWhisperBin())&&fs.existsSync(localWhisperModel()); }
 function sttConfig() {
-  const defaultProvider=isNetlifyRuntime()?'baidu':(hasLocalSenseVoice()?'sensevoice':hasLocalWhisper()?'local':envValue('GROQ_API_KEY')?'groq':'openai');
+  const defaultProvider=hasLocalSenseVoice()?'sensevoice':hasLocalWhisper()?'local':envValue('GROQ_API_KEY')?'groq':'openai';
   const provider=(envValue('STT_PROVIDER')||defaultProvider).toLowerCase();
   if(provider==='sensevoice') return {
     provider,
@@ -2527,6 +2575,36 @@ function sttConfig() {
     model:envValue('STT_MODEL')||envValue('OPENAI_TRANSCRIBE_MODEL')||'gpt-4o-mini-transcribe',
     language:envValue('STT_LANGUAGE')||envValue('OPENAI_TRANSCRIBE_LANGUAGE')||'zh'
   };
+}
+function soundAsrHotwords(data=null) {
+  const source=data&&Array.isArray(data.sounds) ? data : readStore();
+  const words=[];
+  for(const sound of source.sounds||[]) {
+    if(!sound||sound.enabled===false) continue;
+    if(sound.name) words.push(sound.name);
+    for(const tag of Array.isArray(sound.tags)?sound.tags:[]) words.push(tag);
+  }
+  words.push('声音','音效','掌声','猫','狗','下雨','雨声','门铃','敲门','火柴','剪刀','键盘','地铁','洗衣机','蝉鸣');
+  return [...new Set(words.map(word=>String(word||'').trim()).filter(Boolean))].slice(0,300);
+}
+function baiduRealtimeConfig() {
+  return asrToolkit.baiduRealtimeConfig();
+}
+function tencentRealtimeConfig() {
+  return asrToolkit.tencentRealtimeConfig();
+}
+function doubaoRealtimeConfig() {
+  return asrToolkit.doubaoRealtimeConfig();
+}
+function realtimeProviderConfigs() {
+  return asrToolkit.realtimeProviderConfigs();
+}
+function availableAsrProviders() {
+  return asrToolkit.availableAsrProviders();
+}
+function randomAsrProvider() {
+  const providers=availableAsrProviders();
+  return providers.length ? providers[Math.floor(Math.random()*providers.length)] : '';
 }
 async function transcribeAudio(file) {
   const cfg=sttConfig();
@@ -2867,6 +2945,9 @@ function recordUnrecognizedAudioAnswer(data, session, sound, audioAnswer, transc
     audioAnswerId:audioAnswer.id,
     transcriptionStatus:transcription.status||audioAnswer.transcriptionStatus||'empty',
     transcriptionReason:reason,
+    provider:transcription.provider||session.asrProvider||'',
+    asrProvider:session.asrProvider||transcription.provider||'',
+    asrDurationMs:transcription.durationMs||audioAnswer.asrDurationMs||0,
     recognized:false,
     countSoundStats:false
   });
@@ -2953,6 +3034,9 @@ async function processAudioAnswerJob(sessionId, audioAnswerId, uploadedFile=null
       audioAnswerId,
       transcriptionStatus:transcription.status,
       transcriptionReason:audioAnswer.transcriptionReason,
+      provider:transcription.provider||session.asrProvider||'',
+      asrProvider:session.asrProvider||transcription.provider||'',
+      asrDurationMs:transcription.durationMs||0,
       countSoundStats:true
     });
     appendMonitor(session,'server','judge_completed','后台已完成语音判题',{soundId:sound.id,recorded:recorded.ok,correct:Boolean(recorded.result?.correct)});
@@ -3007,6 +3091,14 @@ async function handleRequest(req,res) { try {
   if(p.startsWith('/images/')) return serveFile(req,res,path.join('图片文件',path.basename(decodeURIComponent(p.slice('/images/'.length)))));
   if(req.method==='GET'&&p==='/api/team-stats') return send(res,200,teamStats());
   if(req.method==='GET'&&p==='/api/team-models') return send(res,200,teamModels());
+  if(req.method==='GET'&&p==='/api/asr/config') {
+    const storeData=readStore();
+    return send(res,200,asrToolkit.configPayload(soundAsrHotwords(storeData)),NO_STORE_HEADERS);
+  }
+  if(req.method==='GET'&&p==='/api/asr/health') {
+    const storeData=readStore();
+    return send(res,200,await asrToolkit.providerHealthPayload(soundAsrHotwords(storeData),{force:url.searchParams.get('force')==='1'}),NO_STORE_HEADERS);
+  }
   if(req.method==='POST'&&p==='/api/game/audio-check'&&!takeRateLimit(`audio-check-pre:${clientIp(req)}`,{windowMs:30000,max:12,minIntervalMs:500})) {
     return sendRateLimited(res,'录音上传太频繁，请稍后再试',1200);
   }
@@ -3016,8 +3108,10 @@ async function handleRequest(req,res) { try {
   }
   if(req.method==='GET'&&p==='/api/sounds') return send(res,200,data.sounds.map(publicSound));
   if(req.method==='GET'&&p==='/api/rankings') {
+    const query=Object.fromEntries(url.searchParams.entries());
     const limit=Math.max(1,Math.min(50,Number(url.searchParams.get('limit')||10)||10));
-    const currentUser=getUserById(data,url.searchParams.get('userId')||'')||findRealUserByDeviceId(data,url.searchParams.get('deviceId')||'');
+    if(isCloudRuntime()) await hydrateCloudSidecars(activeCloudContext().store,data);
+    const currentUser=resolveExistingRealUser(data,query);
     const ranking=scoreRankingRows(data);
     const currentRank=currentUser ? ranking.find(x=>x.id===currentUser.id) : null;
     return send(res,200,{
@@ -3025,17 +3119,18 @@ async function handleRequest(req,res) { try {
       user:currentRank || (currentUser ? userPublic(currentUser,data.sounds,sessionsFor(data,currentUser)) : null)
     });
   }
-  if(req.method==='GET'&&p==='/api/admin/sounds') return send(res,200,data.sounds.map(s=>adminSound(s,data.users)));
-  if(req.method==='GET'&&p==='/api/admin/users') return send(res,200,data.users.filter(u=>!isTestUser(u)).map(u=>userPublicWithClient(data,u,data.sounds,data.sessions)).sort((a,b)=>new Date(b.lastSeen)-new Date(a.lastSeen)));
+  if(req.method==='GET'&&p==='/api/admin/sounds') return send(res,200,data.sounds.map(s=>adminSound(s,data.users)),NO_STORE_HEADERS);
+  if(req.method==='GET'&&p==='/api/admin/users') return send(res,200,data.users.filter(u=>!isTestUser(u)).map(u=>userPublicWithClient(data,u,data.sounds,data.sessions)).sort((a,b)=>new Date(b.lastSeen)-new Date(a.lastSeen)),NO_STORE_HEADERS);
   const adminUserAnswersMatch=p.match(/^\/api\/admin\/users\/([^/]+)\/answers$/);
   if(req.method==='GET'&&adminUserAnswersMatch) {
     const userId=decodeURIComponent(adminUserAnswersMatch[1]);
     const u=data.users.find(user=>!isTestUser(user)&&user.id===userId);
     if(!u) return send(res,404,{error:'用户不存在'});
     if(isCloudRuntime()) await hydrateCloudUserSidecars(data,u.id);
-    return send(res,200,adminUserAnswerHistory(data,u));
+    return send(res,200,adminUserAnswerHistory(data,u),NO_STORE_HEADERS);
   }
-  if(req.method==='GET'&&p==='/api/admin/analytics') return send(res,200,analyticsSummary(data));
+  if(req.method==='GET'&&p==='/api/admin/analytics') return send(res,200,analyticsSummary(data),NO_STORE_HEADERS);
+  if(req.method==='GET'&&p==='/api/admin/asr-experiments') return send(res,200,{generatedAt:new Date().toISOString(),providers:asrExperimentStats(data)},NO_STORE_HEADERS);
   if(req.method==='POST'&&p==='/api/analytics/event') {
     const raw=(await body(req)).toString();
     const x=raw ? JSON.parse(raw) : {};
@@ -3112,22 +3207,67 @@ async function handleRequest(req,res) { try {
     const progress=libraryProgress(u,data.sounds,sessionList,playthrough);
     const picked=selectRoundSounds(u,{...data,sessions:sessionList},5), q=picked.questions;
     if(!testMode) q.forEach(sound=>{ sound.listens=Number(sound.listens||0)+1; });
-    const session={id:`${testMode?'test-session-':''}${crypto.randomUUID()}`,userId:u.id,soundIds:q.map(s=>s.id),answers:[],monitor:[],startedAt:new Date().toISOString(),playthrough,libraryCompleteBefore:progress.libraryComplete,libraryAnsweredBefore:progress.libraryAnswered,libraryTotal:progress.libraryTotal,recommendation:picked.meta,isTest:testMode};
-    appendMonitor(session,'server','session_started','后端已创建本轮答题',{questionCount:q.length,soundIds:q.map(s=>s.id),playthrough,libraryCompleteBefore:progress.libraryComplete,libraryAnsweredBefore:progress.libraryAnswered,libraryTotal:progress.libraryTotal,recommendation:picked.meta});
+    const health=await asrToolkit.providerHealthPayload(soundAsrHotwords(data));
+    const requested=Array.isArray(x.availableAsrProviders) ? new Set(x.availableAsrProviders.map(String)) : null;
+    const providers=health.availableProviders.filter(provider=>!requested||requested.has(provider));
+    if(!providers.length) return send(res,503,{error:'当前没有可用的实时语音识别服务',asrHealth:health});
+    const asrProvider=providers[Math.floor(Math.random()*providers.length)];
+    const session={id:`${testMode?'test-session-':''}${crypto.randomUUID()}`,userId:u.id,soundIds:q.map(s=>s.id),answers:[],monitor:[],startedAt:new Date().toISOString(),playthrough,libraryCompleteBefore:progress.libraryComplete,libraryAnsweredBefore:progress.libraryAnswered,libraryTotal:progress.libraryTotal,recommendation:picked.meta,asrProvider,asrProviderLabel:ASR_PROVIDER_LABELS[asrProvider]||'实时语音识别未配置',isTest:testMode};
+    appendMonitor(session,'server','session_started','后端已创建本轮答题',{questionCount:q.length,soundIds:q.map(s=>s.id),playthrough,libraryCompleteBefore:progress.libraryComplete,libraryAnsweredBefore:progress.libraryAnswered,libraryTotal:progress.libraryTotal,recommendation:picked.meta,asrProvider,asrProviderLabel:session.asrProviderLabel});
     if(testMode) {
       TEST_SESSIONS.set(session.id,session);
-      return send(res,200,{sessionId:session.id,questions:q.map(publicSound),playthrough,testMode:true});
+      return send(res,200,{sessionId:session.id,questions:q.map(publicSound),playthrough,asrProvider,asrProviderLabel:session.asrProviderLabel,testMode:true});
     }
     queueCloudSessionSidecar(session);
     data.sessions.push(session);
     writeStore(data);
-    return send(res,200,{sessionId:session.id,questions:q.map(publicSound),playthrough});
+    return send(res,200,{sessionId:session.id,questions:q.map(publicSound),playthrough,asrProvider,asrProviderLabel:session.asrProviderLabel});
     } finally {
       leaveRequestGuard(startGuardKey,2200,20000);
     }
   }
   if(req.method==='GET'&&p.startsWith('/api/game/monitor/')) { const sessionId=p.split('/').pop(); await hydrateCloudSessionSidecars(data,sessionId); if(!takeRateLimit(requestKey(req,url,{sessionId},'monitor-poll'),{windowMs:3000,max:6,minIntervalMs:350})) return sendRateLimited(res,'监控刷新太频繁，请稍后再试',800); const s=getSessionById(data,sessionId);if(!s)return send(res,404,{error:'监控记录不存在'});return send(res,200,{sessionId:s.id,startedAt:s.startedAt,answeredCount:(s.answers||[]).length,total:s.soundIds.length,events:s.monitor||[]}); }
   if(req.method==='POST'&&p==='/api/game/monitor-event') { const x=JSON.parse((await body(req)).toString()); await hydrateCloudSessionSidecars(data,x.sessionId); const session=getSessionById(data,x.sessionId); if(!session)return send(res,404,{error:'监控记录不存在'}); if(!takeRateLimit(requestKey(req,url,x,`monitor-event:${String(x.type||'').slice(0,60)}`),{windowMs:3000,max:8,minIntervalMs:180})) return send(res,200,{ok:true,skipped:true,reason:'rate_limited',testMode:isTestSession(session)}); const event=appendMonitor(session,'client',String(x.type||'client_event').slice(0,60),String(x.message||'客户端事件').slice(0,120),x.details||{}); if(!isTestSession(session)) writeStore(data); return send(res,200,{ok:true,event,testMode:isTestSession(session)}); }
+  if(req.method==='POST'&&p==='/api/game/answer-text') {
+    const x=JSON.parse((await body(req)).toString());
+    await hydrateCloudSessionSidecars(data,x.sessionId);
+    const session=getSessionById(data,x.sessionId);
+    const u=session&&getUserById(data,session.userId);
+    const soundId=String(x.soundId||x.questionId||'');
+    const sound=session&&data.sounds.find(s=>s.id===soundId);
+    if(!session||!u||!sound||!(session.soundIds||[]).includes(sound.id)) return send(res,404,{error:'题目不存在'});
+    const answerGuardKey=requestKey(req,url,{sessionId:x.sessionId,soundId},'answer-text');
+    if(!enterRequestGuard(answerGuardKey,2200,20000)) return sendRateLimited(res,'本题语音判断正在提交，请稍候',1400);
+    try {
+      const testMode=isTestSession(session)||isTestUser(u)||isTestRequest(req,url,x);
+      const transcript=String(x.transcript||x.answer||'').trim();
+      if(!transcript) return send(res,422,{error:'没有识别到文字，请再试一次'});
+      const existingAnswer=session.answers.find(a=>a.soundId===sound.id);
+      if(existingAnswer) {
+        appendMonitor(session,'server','answer_duplicate_accepted','本题已记录，后端按幂等成功返回',{soundId:sound.id,inputMode:'voice'});
+        if(!testMode) writeStore(data);
+        return send(res,200,{ok:true,duplicate:true,transcript:existingAnswer.answer||'',answer:existingAnswer.answer||'',correct:Boolean(existingAnswer.correct),provider:existingAnswer.provider||session.asrProvider||'',asrDurationMs:existingAnswer.asrDurationMs||0,testMode});
+      }
+      const provider=String(session.asrProvider||x.provider||'').slice(0,80);
+      const asrDurationMs=Number(x.asrDurationMs||0);
+      appendMonitor(session,'server','speech_transcribed','实时语音识别已返回文字',{soundId:sound.id,transcript:transcript.slice(0,120),provider,durationMs:asrDurationMs});
+      const recorded=recordJudgedAnswer(data,session,sound,transcript,{
+        inputMode:'voice',
+        provider,
+        asrProvider:provider,
+        asrDurationMs,
+        transcriptionStatus:'ok',
+        testMode
+      });
+      if(!recorded.ok&&recorded.duplicate) return send(res,200,{ok:true,duplicate:true,transcript,answer:transcript,testMode});
+      if(!recorded.ok) return send(res,404,{error:recorded.error||'题目不存在'});
+      appendMonitor(session,'server','judge_completed','后端已完成实时语音判题',{soundId:sound.id,recorded:true,correct:Boolean(recorded.result?.correct),provider});
+      if(!testMode) writeStore(data);
+      return send(res,200,{ok:true,transcript:recorded.answerRecord.answer,answer:recorded.answerRecord.answer,correct:Boolean(recorded.answerRecord.correct),provider,asrDurationMs,testMode});
+    } finally {
+      leaveRequestGuard(answerGuardKey,2200,20000);
+    }
+  }
   if(req.method==='POST'&&p==='/api/game/audio-check') {
     const b=await body(req), {fields,files}=parseMultipart(b,req.headers['content-type']||'');
     await hydrateCloudSessionSidecars(data,fields.sessionId);
@@ -3296,11 +3436,31 @@ async function handleRequest(req,res) { try {
       leaveRequestGuard(adminGuardKey,2500,30000);
     }
   }
-  if(p==='/'||p==='/index.html')return serveFile(req,res,'public/index.html'); if(p==='/team.html')return serveFile(req,res,'public/team.html'); if(p==='/admin.html')return serveAdminFile(req,res,'public/admin.html'); if(p==='/admin-users.html')return serveAdminFile(req,res,'public/admin-users.html'); if(p==='/admin-analytics.html')return serveAdminFile(req,res,'public/admin-analytics.html'); if(p==='/admin-tags.html')return serveAdminFile(req,res,'public/admin-tags.html'); if(p.startsWith('/public/'))return serveFile(req,res,p.slice(1));return send(res,404,{error:'未找到页面'});
+  if(p==='/'||p==='/index.html')return serveFile(req,res,'public/index.html'); if(p==='/team.html')return serveFile(req,res,'public/team.html'); if(p==='/admin'||p==='/admin.html')return serveAdminFile(req,res,'public/admin.html'); if(p==='/admin/users'||p==='/admin-users.html')return serveAdminFile(req,res,'public/admin-users.html'); if(p==='/admin/analytics'||p==='/admin-analytics.html')return serveAdminFile(req,res,'public/admin-analytics.html'); if(p==='/admin/tags'||p==='/admin-tags.html')return serveAdminFile(req,res,'public/admin-tags.html'); if(p.startsWith('/public/'))return serveFile(req,res,p.slice(1));return send(res,404,{error:'未找到页面'});
 } catch(e) { console.error(e); send(res,400,{error:e.message||'请求处理失败'}); }}
 
+function attachAsrWebSocketServer(server) {
+  return asrToolkit.attachWebSocketServer(server,{
+    path:'/ws/asr',
+    resolveStart(payload) {
+      const data=readStore();
+      const session=getSessionById(data,String(payload.sessionId||''));
+      const soundId=String(payload.soundId||payload.questionId||'');
+      const sound=session&&data.sounds.find(item=>item.id===soundId);
+      if(!session||!sound||!(session.soundIds||[]).includes(sound.id)||(session.answers||[]).some(item=>item.soundId===sound.id)) throw Error('题目不存在或已经作答');
+      return {
+        provider:session.asrProvider||randomAsrProvider()||'baidu-realtime',
+        hotwords:soundAsrHotwords(data),
+        uid:session.userId||session.id
+      };
+    }
+  });
+}
+
 if(require.main===module) {
-  http.createServer(handleRequest).listen(PORT,'0.0.0.0',()=>console.log(`声音侦探已启动：http://localhost:${PORT}${PUBLIC_MODE?'（公网模式）':''}`));
+  const server=http.createServer(handleRequest);
+  attachAsrWebSocketServer(server);
+  server.listen(PORT,'0.0.0.0',()=>console.log(`声音侦探已启动：http://localhost:${PORT}${PUBLIC_MODE?'（公网模式）':''}`));
 }
 
 module.exports={
@@ -3308,5 +3468,4 @@ module.exports={
   withCloudRequest,
   flushCloudStore,
   envValue,
-  isNetlifyRuntime
 };

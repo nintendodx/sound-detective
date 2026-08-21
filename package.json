@@ -1,22 +1,26 @@
 {
   "name": "dx100-sound-game",
-  "version": "1.0.0",
+  "version": "0.2.012",
   "private": true,
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "check": "node --check server.js && node --check scripts/build-netlify.js && node --check scripts/release-cloud.js && node --check scripts/sync-cloud-data.mjs",
-    "build:netlify": "node scripts/build-netlify.js",
-    "cloud:push": "node scripts/sync-cloud-data.mjs push",
-    "cloud:pull": "node scripts/sync-cloud-data.mjs pull",
-    "cloud:list": "node scripts/sync-cloud-data.mjs list",
-    "release:cloud": "node scripts/release-cloud.js",
-    "release:preview": "node scripts/release-cloud.js --preview"
+    "check": "node --check server.js && node --check cloudflare/worker.mjs && node --check cloudflare/light-game.mjs && node --check scripts/build-cloudflare.js && node --check scripts/build-cloudflare-pages.js && node --check scripts/release-cloudflare-pages.js && node --check scripts/sync-cloudflare-data.mjs && node --check scripts/sync-cloudflare-secrets.mjs",
+    "build:cloudflare": "node scripts/build-cloudflare.js",
+    "build:cloudflare:pages": "node scripts/build-cloudflare-pages.js",
+    "cloudflare:push": "node scripts/sync-cloudflare-data.mjs push",
+    "cloudflare:pull": "node scripts/sync-cloudflare-data.mjs pull",
+    "cloudflare:list": "node scripts/sync-cloudflare-data.mjs list",
+    "cloudflare:secrets": "node scripts/sync-cloudflare-secrets.mjs",
+    "release": "node scripts/release-cloudflare-pages.js"
   },
   "dependencies": {
-    "@netlify/blobs": "^9.1.5"
+    "ws": "^8.21.0"
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "wrangler": "^4.123.0"
   }
 }

@@ -1,0 +1,45 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "sound-detective",
+  "pages_build_output_dir": "./dist-cloudflare",
+  "compatibility_date": "2026-08-18",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "ADMIN_HUB_DATA",
+      "id": "a6b3a926a6624e4892e0e43741e19619"
+    },
+    {
+      "binding": "SOUND_DETECTIVE_DATA",
+      "id": "d3d0526f213e4ec29e6223751b609a7c"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ADMIN_HUB_ASSETS",
+      "bucket_name": "game-admin-assets"
+    }
+  ],
+  "vars": {
+    "DX100_STORAGE": "cloudflare",
+    "PUBLIC_MODE": "true",
+    "STT_PROVIDER": "baidu",
+    "BAIDU_ASR_ENDPOINT": "https://vop.baidu.com/pro_api",
+    "BAIDU_ASR_DEV_PID": "80001",
+    "BAIDU_ASR_FORMAT": "pcm",
+    "BAIDU_ASR_RATE": "16000",
+    "BAIDU_ASR_CUID": "voice-detective-cloudflare",
+    "BAIDU_REALTIME_ASR_DEV_PID": "15372",
+    "TENCENT_ASR_ENGINE_MODEL_TYPE": "16k_zh_en_speaker",
+    "TENCENT_ASR_VAD_SILENCE_TIME": "800",
+    "TENCENT_ASR_ENABLED": "true",
+    "BAIDU_REALTIME_ASR_ENABLED": "true",
+    "DOUBAO_ASR_ENDPOINT": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async",
+    "DOUBAO_ASR_RESOURCE_ID": "volc.bigasr.sauc.duration",
+    "DOUBAO_ASR_END_WINDOW_SIZE": "800",
+    "DOUBAO_ASR_FORCE_TO_SPEECH_TIME": "1000",
+    "DOUBAO_ASR_ENABLED": "true"
+  }
+}

@@ -4,29 +4,29 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>声音侦探</title>
-  <link rel="stylesheet" href="/public/style.css?v=0.1079-20260814">
+  <link rel="stylesheet" href="/public/style.css?v=0.2.012-20260821">
 </head>
 <body>
   <main class="app">
     <section id="welcome">
       <button id="changelogOpen" class="version-chip" type="button" aria-label="查看更新日志" title="更新日志">
         <span class="changelog-icon" aria-hidden="true">!</span>
-        <span id="appVersion">0.1079-20260814</span>
+        <span id="appVersion">0.2.012-20260821</span>
       </button>
       <a class="home-team-link" href="/team.html">Credits</a>
       <div class="hero">
         <h1 class="brand-title">
-          <img src="/public/brand-wordmark.svg?v=0.1079-20260814" alt="声音侦探">
+          <img src="/public/brand-wordmark.svg?v=0.1088-20260818" alt="声音侦探">
         </h1>
       </div>
-      <img class="howto-image" src="/public/how-to-play.svg?v=0.1079-20260814" alt="划火柴声音回答示例">
+      <img class="howto-image" src="/public/how-to-play.svg?v=0.1088-20260818" alt="划火柴声音回答示例">
       <div class="card">
         <label for="name">你的昵称</label>
         <input class="input" id="name" maxlength="20" placeholder="例如：王牌侦探" autocomplete="nickname">
         <button class="primary" id="start" type="button">开始挑战</button>
         <button class="share history-open" id="historyOpen" type="button">过往成绩</button>
         <button class="share ranking-open" id="rankingOpen" type="button">查看排名</button>
-        <button class="share" data-share type="button">分享给朋友</button>
+        <button class="share" data-feedback type="button">用户反馈</button>
       </div>
     </section>
 
@@ -42,17 +42,39 @@
           <div class="sound-wave" aria-hidden="true">
             <i></i><i></i><i></i><i></i><i></i>
           </div>
-          <span id="soundStageText">准备播放声音</span>
+          <span id="soundStageText">准备播放</span>
         </div>
-        <div class="playback-notice" id="playbackNotice" aria-live="polite">准备播放声音</div>
-      </div>
-      <div class="answer-area">
-        <div class="answer-wrap">
-          <div class="replay-zone">
+        <div class="replay-zone" aria-label="问题音频">
+          <div class="playback-control">
+            <div class="playback-copy">
+              <span>问题音频</span>
+              <strong id="playbackControlText">准备播放</strong>
+            </div>
             <button class="replay" id="replay" type="button">↻ 再听一次</button>
           </div>
-          <button class="record" id="record" type="button">说出你的判断</button>
-          <div class="switch" id="switch">或手动输入判断</div>
+        </div>
+      </div>
+      <div class="answer-area" hidden>
+        <div class="answer-wrap">
+          <div id="speechCaption" class="speech-caption waiting" aria-live="polite" aria-label="实时语音字幕">
+            <span class="caption-speaker">你说</span>
+            <div class="caption-line">
+              <span id="recognitionText" class="recognition-text placeholder" data-text="">等待你开口</span>
+              <i class="caption-cursor" aria-hidden="true"></i>
+            </div>
+          </div>
+          <div id="answerDock" class="answer-dock preparing">
+            <div class="listening-indicator" aria-hidden="true">
+              <i></i><i></i><i></i><i></i><i></i>
+            </div>
+            <strong id="listeningStatus" class="listening-status">准备中</strong>
+            <p id="voiceSupport" class="voice-support">声音播放后自动收音</p>
+            <div class="voice-actions">
+              <button id="stopAnswerButton" class="stop-answer-button hidden" type="button"><span aria-hidden="true"></span>停止并提交</button>
+              <button id="retryAnswerButton" class="retry-answer-button hidden" type="button">重新回答</button>
+            </div>
+          </div>
+          <div class="switch hidden" id="switch">或手动输入判断</div>
           <div id="textAnswer" class="hidden">
             <input class="input" id="answerText" placeholder="输入你听到的物品或场景">
             <button class="primary" id="submitText" type="button">提交判断</button>
@@ -91,7 +113,7 @@
         <div id="ranking"></div>
       </div>
       <button class="primary" id="again" type="button">再来 5 题</button>
-      <button class="share" data-share type="button">分享给朋友</button>
+      <button class="share" data-feedback type="button">用户反馈</button>
     </section>
 
     <section id="complete" class="finish summary-page hidden">
@@ -118,7 +140,7 @@
         <div id="completeRanking"></div>
       </div>
       <button class="primary" id="completeAgain" type="button">重新开始</button>
-      <button class="share" data-share type="button">分享给朋友</button>
+      <button class="share" data-feedback type="button">用户反馈</button>
     </section>
   </main>
   <div class="modal hidden" id="changelogModal" role="dialog" aria-modal="true" aria-labelledby="changelogTitle">
@@ -127,7 +149,7 @@
       <div class="modal-head">
         <div>
           <span>Demo 更新日志</span>
-          <b id="changelogTitle">0.1079-20260814</b>
+          <b id="changelogTitle">0.2.012-20260821</b>
         </div>
         <button id="changelogClose" type="button" aria-label="关闭更新日志">×</button>
       </div>
@@ -162,7 +184,12 @@
       </div>
     </div>
   </div>
+  <div class="modal hidden" id="feedbackModal" role="dialog" aria-modal="true" aria-labelledby="feedbackTitle">
+    <div class="modal-backdrop" id="feedbackBackdrop"></div>
+    <div class="modal-card feedback-card"><div class="modal-head"><div><span>声音侦探</span><b id="feedbackTitle">用户反馈</b></div><button id="feedbackClose" type="button" aria-label="关闭">×</button></div><form id="feedbackForm" class="feedback-form"><textarea id="feedbackContent" maxlength="2000" rows="6" required placeholder="请告诉我们你的想法或遇到的问题"></textarea><button id="feedbackSubmit" class="primary" type="submit">提交反馈</button></form></div>
+  </div>
   <div class="toast hidden" id="toast"></div>
-  <script src="/public/app.js?v=0.1079-20260814"></script>
+  <script src="/public/shared/voice-asr-client.js?v=0.2.012-20260821"></script>
+  <script src="/public/app.js?v=0.2.012-20260821"></script>
 </body>
 </html>

@@ -29,6 +29,13 @@ const eventLabels = {
   record_started: '开始录音',
   record_stop_click: '手动结束录音',
   record_auto_stopped: '自动结束录音',
+  asr_config_error: 'ASR 配置失败',
+  asr_connect_started: 'ASR 开始连接',
+  asr_ready: 'ASR 已就绪',
+  asr_first_partial: 'ASR 首字返回',
+  asr_final: 'ASR 最终结果',
+  asr_error: 'ASR 实时错误',
+  asr_retry: '重新回答',
   mic_opened: '麦克风打开',
   mic_error: '麦克风失败',
   audio_probe_started: '录音采集',
@@ -88,6 +95,19 @@ function metric(label, value, note = '') {
   `;
 }
 
+async function readJsonResponse(response, fallback = '读取失败') {
+  const text = await response.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    const type = response.headers.get('content-type') || '未知类型';
+    throw new Error(`后台接口返回了非 JSON 内容（HTTP ${response.status}，${type}）`);
+  }
+  if (!response.ok) throw new Error(data.error || fallback);
+  return data;
+}
+
 function objectSummary(input) {
   const details = input && typeof input === 'object' ? input : {};
   const pairs = Object.entries(details)
@@ -123,13 +143,33 @@ function renderMetrics(data) {
     metric('5 秒自动结束', number(r.recordAutoStops)),
     metric('麦克风打开', number(r.micOpened)),
     metric('音频上传', number(r.audioUploaded)),
+    metric('ASR 连接', number(r.asrConnectStarted), `成功 ${number(r.asrReady)}`),
+    metric('ASR 最终结果', number(r.asrFinals)),
     metric('识别出文字', number(r.transcribed)),
     metric('收到但无文字', number(r.audioReceivedNoText)),
     metric('录音/识别错误', number(r.errors)),
     metric('点击到开始率', `${number(r.clickToStartRate)}%`),
+    metric('连接成功率', `${number(r.connectSuccessRate)}%`),
+    metric('开始到识别率', `${number(r.startToTranscribedRate)}%`),
     metric('开始到上传率', `${number(r.startToUploadRate)}%`),
     metric('上传到识别率', `${number(r.uploadToTranscribedRate)}%`)
   ].join('');
+}
+
+function renderAsrExperiments(data) {
+  renderRows('#asrRows', data.asrExperiments || [], '暂无 ASR 分组数据', row => `
+    <tr>
+      <td><b>${esc(row.label || row.provider)}</b><small>${esc(row.provider)}</small></td>
+      <td>${row.configured ? '已配置' : '未配置'}</td>
+      <td>${number(row.assignedRounds)}<small>${number(row.uniqueUsers)} 人</small></td>
+      <td>${number(row.completionRate)}%</td>
+      <td>${number(row.connectSuccessRate)}%<small>${number(row.ready)} / ${number(row.connectAttempts)}</small></td>
+      <td>${number(row.recognitionSuccessRate)}%<small>${number(row.finals)} / ${number(row.recordStarts)}</small></td>
+      <td class="${Number(row.errorRate || 0) ? 'danger' : ''}">${number(row.errorRate)}%</td>
+      <td>${duration(row.firstTextP50)}</td>
+      <td>${duration(row.finalP50)}</td>
+    </tr>
+  `, 9);
 }
 
 function statPills(rows = [], labelFn = row => row.key) {
@@ -257,10 +297,10 @@ async function loadAnalytics() {
   const status = $('#analyticsUpdated');
   status.textContent = '正在读取埋点数据...';
   try {
-    const res = await fetch('/api/admin/analytics');
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || '读取失败');
+    const res = await fetch(`/api/admin/analytics?t=${Date.now()}`, { cache: 'no-store', headers: { Accept: 'application/json' } });
+    const data = await readJsonResponse(res);
     renderMetrics(data);
+    renderAsrExperiments(data);
     renderClientStats(data);
     renderCompatibility(data);
     renderTables(data);

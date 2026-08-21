@@ -3,24 +3,23 @@ const path = require('node:path');
 
 const ROOT = path.resolve(__dirname, '..');
 const PUBLIC_DIR = path.join(ROOT, 'public');
-const DIST_DIR = path.join(ROOT, 'dist');
+const DIST_DIR = path.join(ROOT, 'dist-cloudflare');
 const DIST_PUBLIC_DIR = path.join(DIST_DIR, 'public');
-const EXCLUDE = new Set([
-  'admin.html',
-  'admin-users.html',
-  'admin-tags.html',
-  'admin-analytics.html',
-  'admin.js',
-  'admin-users.js',
-  'admin-tags.js',
-  'admin-analytics.js',
-  'admin.css',
-  'dx100-root-ca.crt'
-]);
-const SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.html', '.css', '.toml', '.json', '.md', '.sql']);
-const METRIC_EXCLUDED_DIRS = new Set(['.git', '.netlify', '.certs', 'node_modules', 'dist', 'data', 'uploads', '图片文件', '声音文件']);
+const SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.html', '.css', '.toml', '.json', '.jsonc', '.md', '.sql']);
+const METRIC_EXCLUDED_DIRS = new Set(['.git', '.netlify', '.wrangler', '.certs', 'node_modules', 'dist', 'dist-cloudflare', 'data', 'uploads', '图片文件', '声音文件']);
 const METRIC_EXCLUDED_PREFIXES = ['tools/whisper-local', 'tools/sensevoice'];
 const METRIC_EXCLUDED_FILES = new Set(['package-lock.json']);
+const REMOVED_ADMIN_ASSETS = new Set([
+  'admin.html',
+  'admin.js',
+  'admin-users.html',
+  'admin-users.js',
+  'admin-tags.html',
+  'admin-tags.js',
+  'admin-analytics.html',
+  'admin-analytics.js',
+  'admin.css'
+]);
 
 function metricRelative(file) {
   return path.relative(ROOT, file).split(path.sep).join('/');
@@ -36,8 +35,8 @@ function isMetricExcludedFile(relative) {
 
 function metricCategory(relative) {
   if (relative.startsWith('public/') && /\.(?:html|css|js)$/i.test(relative)) return '前端界面';
-  if (relative === 'server.js' || relative.startsWith('netlify/functions/')) return '服务端/API';
-  if (relative.startsWith('scripts/') || relative.startsWith('docs/') || relative.startsWith('tools/') || relative === 'netlify.toml' || relative === 'package.json' || relative === 'README.md' || relative === 'DX100-声音游戏.md') return '脚本/配置';
+  if (relative === 'server.js' || relative.startsWith('cloudflare/')) return '服务端/API';
+  if (relative.startsWith('scripts/') || relative.startsWith('docs/') || relative.startsWith('tools/') || relative === 'wrangler.jsonc' || relative === 'package.json' || relative === 'README.md' || relative === 'DX100-声音游戏.md') return '脚本/配置';
   return '其他工程文件';
 }
 
@@ -115,7 +114,7 @@ function appVersion() {
 function updateHtmlVersion(file, version) {
   const target = path.join(DIST_DIR, file);
   let html = fs.readFileSync(target, 'utf8');
-  html = html.replace(/(\/public\/(?:style\.css|app\.js|team\.js|brand-wordmark\.svg|how-to-play\.svg)\?v=)[^"']+/g, `$1${version}`);
+  html = html.replace(/(\/public\/(?:style\.css|app\.js|team\.js|brand-wordmark\.svg|how-to-play\.svg|admin(?:[-.]|$)[^"']*)\?v=)[^"']+/g, `$1${version}`);
   html = html.replace(/(<span id="appVersion">)[^<]+(<\/span>)/, `$1${version}$2`);
   html = html.replace(/(<b id="changelogTitle">)[^<]+(<\/b>)/, `$1${version}$2`);
   fs.writeFileSync(target, html);
@@ -124,7 +123,8 @@ function updateHtmlVersion(file, version) {
 function copyDir(from, to) {
   fs.mkdirSync(to, { recursive: true });
   for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
-    if (EXCLUDE.has(entry.name)) continue;
+    if (entry.name === 'dx100-root-ca.crt') continue;
+    if (from === PUBLIC_DIR && REMOVED_ADMIN_ASSETS.has(entry.name)) continue;
     const source = path.join(from, entry.name);
     const target = path.join(to, entry.name);
     if (entry.isDirectory()) copyDir(source, target);
@@ -150,8 +150,9 @@ fs.writeFileSync(
     '',
     '/public/*',
     '  Cache-Control: public, max-age=0, must-revalidate',
+    '',
     ''
   ].join('\n')
 );
 
-console.log(`Netlify static build ready: ${path.relative(ROOT, DIST_DIR)}`);
+console.log(`Cloudflare static build ready: ${path.relative(ROOT, DIST_DIR)}`);

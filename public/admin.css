@@ -375,6 +375,21 @@ input {
   overflow-wrap: anywhere;
   line-height: 1.45;
 }
+
+table {
+  text-align: center;
+}
+
+th,
+td {
+  text-align: center;
+  vertical-align: middle;
+}
+
+td small,
+td b {
+  text-align: center;
+}
 .event-pills {
   display: flex;
   flex-wrap: wrap;

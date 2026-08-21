@@ -1,0 +1,21 @@
+{
+  "id": "20260820T060824Z",
+  "createdAt": "2026-08-20T06:08:24.110Z",
+  "mode": "cloudflare-pages",
+  "projectName": "sound-detective",
+  "pagesDevUrl": "https://sound-detective.pages.dev",
+  "gitCommit": "f2c6671",
+  "gitBranch": "main",
+  "counts": {
+    "sounds": 30,
+    "enabledSounds": 30,
+    "users": 45,
+    "sessions": 82,
+    "analyticsEvents": 3898
+  },
+  "synced": {
+    "data": true,
+    "assets": true,
+    "secrets": true
+  }
+}

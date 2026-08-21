@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>统计分析 · 声音侦探</title>
-  <link rel="stylesheet" href="/public/admin.css?v=0.1072-20260812">
+  <link rel="stylesheet" href="/public/admin.css?v=0.1089-20260820">
 </head>
 <body>
   <aside>
@@ -28,6 +28,15 @@
     <section class="panel analytics-panel">
       <h2>录音与识别</h2>
       <div class="metric-grid compact" id="recordingGrid"></div>
+    </section>
+    <section class="panel analytics-panel">
+      <h2>ASR 服务分组</h2>
+      <div class="table-wrap">
+        <table class="analytics-table">
+          <thead><tr><th>服务</th><th>配置</th><th>分配轮数</th><th>完成率</th><th>连接成功</th><th>识别成功</th><th>错误率</th><th>首字 P50</th><th>最终 P50</th></tr></thead>
+          <tbody id="asrRows"></tbody>
+        </table>
+      </div>
     </section>
     <section class="panel analytics-panel">
       <h2>系统与浏览器</h2>
@@ -89,6 +98,6 @@
       </div>
     </section>
   </main>
-  <script src="/public/admin-analytics.js?v=0.1072-20260812"></script>
+  <script src="/public/admin-analytics.js?v=0.1089-20260820"></script>
 </body>
 </html>

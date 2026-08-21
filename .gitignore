@@ -5,7 +5,12 @@ node_modules/
 .certs/
 .netlify/
 dist/
+dist-cloudflare/
+.wrangler/
+.dev.vars
+.dev.vars.*
 data/store.json
+data/store.json.backup-*
 data/store.backup-*
 data/asr-recordings/
 data/asr-comparisons/

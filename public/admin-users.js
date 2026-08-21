@@ -14,6 +14,19 @@ function date(s) {
   return Number.isNaN(d.getTime()) ? '-' : d.toLocaleString('zh-CN', { hour12: false });
 }
 
+async function readJsonResponse(response, fallback = '加载失败') {
+  const text = await response.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    const type = response.headers.get('content-type') || '未知类型';
+    throw new Error(`后台接口返回了非 JSON 内容（HTTP ${response.status}，${type}）`);
+  }
+  if (!response.ok) throw new Error(data.error || fallback);
+  return data;
+}
+
 function scoreCell(user) {
   const total = Number(user.total || 0);
   const correct = Number(user.correct || 0);
@@ -81,6 +94,8 @@ function answerMeta(record) {
   const parts = [];
   if (record.answeredAt) parts.push(date(record.answeredAt));
   if (record.inputMode) parts.push(inputModeLabel(record.inputMode));
+  if (record.provider) parts.push(record.provider);
+  if (Number(record.asrDurationMs || 0) > 0) parts.push(`${Math.round(Number(record.asrDurationMs))}ms`);
   if (record.transcriptionReason) parts.push(record.transcriptionReason);
   return parts.join(' · ') || '-';
 }
@@ -154,9 +169,8 @@ async function openUserAnswers(userId) {
   $('#answerDialogBody').innerHTML = '<div class="history-empty answer-empty">正在加载回答记录...</div>';
   if (!dialog.open) openDialog(dialog);
   try {
-    const r = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/answers?t=${Date.now()}`, { cache: 'no-store' });
-    const payload = await r.json();
-    if (!r.ok) throw new Error(payload.error || '加载失败');
+    const r = await fetch(`/api/admin/users/${encodeURIComponent(userId)}/answers?t=${Date.now()}`, { cache: 'no-store', headers: { Accept: 'application/json' } });
+    const payload = await readJsonResponse(r);
     renderAnswerHistory(payload);
   } catch (e) {
     $('#answerDialogMeta').textContent = '加载失败';
@@ -165,9 +179,8 @@ async function openUserAnswers(userId) {
 }
 
 async function loadUsers() {
-  const r = await fetch(`/api/admin/users?t=${Date.now()}`, { cache: 'no-store' });
-  const users = await r.json();
-  if (!r.ok) throw new Error(users.error || '加载失败');
+  const r = await fetch(`/api/admin/users?t=${Date.now()}`, { cache: 'no-store', headers: { Accept: 'application/json' } });
+  const users = await readJsonResponse(r);
   usersById = new Map(users.map(u => [u.id, u]));
   $('#userRows').innerHTML = users.map(u => `
     <tr>

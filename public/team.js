@@ -25,29 +25,34 @@ async function loadModelStats() {
   if (!list) return;
   try {
     const [models, stats] = await Promise.all([fetchJson('/api/team-models'), fetchJson('/api/team-stats')]);
+    const modelItems = Array.isArray(models.items) ? models.items : [];
+    const asr = modelItems.find(item => String(item.stage || '').includes('语音'));
+    const judge = modelItems.find(item => String(item.stage || '').includes('答案判定'));
     const codeLines = Number(stats.codeLines || stats.sourceLines || 0);
     const fileCount = Number(stats.fileCount || 0);
-    const updatedAt = stats.updatedAt ? new Date(stats.updatedAt).toLocaleString('zh-CN') : '刚刚';
     const codeText = codeLines ? `${codeLines.toLocaleString('zh-CN')} 行代码` : '暂时无法读取';
     const codeMeta = codeLines
-      ? `${fileCount.toLocaleString('zh-CN')} 个工程文件 · ${stats.excludes || '不含声音素材、图片素材、题库数据和依赖包'} · 更新于 ${updatedAt}`
-      : '统计不含声音素材、图片素材、题库数据和依赖包';
-    const asrCount = Number(stats.asrTranscriptionCount || 0);
+      ? `${fileCount.toLocaleString('zh-CN')} 个工程文件，不含素材、数据、录音和依赖。`
+      : '统计不含素材、数据、录音和依赖。';
     const rows = [
-      ...(Array.isArray(models.items) ? models.items.slice(0, 1) : []),
+      {
+        stage: '声音判题',
+        model: judge?.model || '本地语义规则匹配器',
+        version: judge?.version || '',
+        usage: '匹配声音名称、标签和同义表达，用于判断玩家回答。'
+      },
+      {
+        stage: '语音识别',
+        model: asr?.model || '实时语音识别',
+        version: '服务端实时转写',
+        usage: '实时 ASR 配置由服务端读取，密钥只保存在 Cloudflare，不进入前端。'
+      },
       {
         stage: '工程量统计',
         model: '代码规模',
         version: codeText,
         usage: codeMeta
-      },
-      {
-        stage: '语音识别统计',
-        model: '累计识别语音',
-        version: `${asrCount.toLocaleString('zh-CN')} 次`,
-        usage: '统计已完成 ASR 调用的用户语音，不包含仍在排队的录音'
-      },
-      ...(Array.isArray(models.items) ? models.items.slice(1) : [])
+      }
     ];
     list.innerHTML = rows.map(modelRow).join('');
   } catch (e) {
