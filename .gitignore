@@ -7,9 +7,11 @@ node_modules/
 dist/
 dist-cloudflare/
 .wrangler/
+.hallmark/
 .dev.vars
 .dev.vars.*
 data/store.json
+data/events.json
 data/store.json.backup-*
 data/store.backup-*
 data/asr-recordings/
@@ -18,12 +20,7 @@ tools/cloudflared
 tools/*.tgz
 tools/sensevoice/
 tools/whisper-local/
-声音文件/
+/uploads
+/图片文件
+/声音文件
 public/dx100-root-ca.crt
-uploads/*
-!uploads/.gitkeep
-!uploads/*.mp3
-!uploads/*.wav
-!uploads/*.m4a
-!uploads/*.ogg
-!uploads/*.webm

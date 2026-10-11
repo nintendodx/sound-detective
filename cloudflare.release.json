@@ -1,0 +1,26 @@
+{
+  "projectName": "sound-detective",
+  "productionUrl": "https://stardream.studio/games/sound/",
+  "distDir": "dist-cloudflare",
+  "checkScript": "check",
+  "buildScript": "build:pages",
+  "version": "0.3.8-20261009",
+  "versionDate": "20261009",
+  "envFile": "../../../../integrations/api-config/all-service.env",
+  "verifyUrl": "https://stardream.studio/games/sound/api/health",
+  "asrHealthUrl": "https://stardream.studio/games/sound/api/asr/health?force=1",
+  "sharedAsr": {
+    "sourceDir": "../../../infrastructure/game-services/runtime/shared",
+    "sharedTargetDir": "shared",
+    "voiceClientTarget": "public/shared/voice-asr-client.js"
+  },
+  "secrets": [
+    "TENCENT_ASR_APP_ID",
+    "TENCENT_ASR_SECRET_ID",
+    "TENCENT_ASR_SECRET_KEY"
+  ],
+  "syncAssets": {
+    "command": "node",
+    "args": ["scripts/sync-cloudflare-data.mjs", "push", "--assets", "--images"]
+  }
+}

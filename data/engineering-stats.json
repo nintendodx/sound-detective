@@ -1,67 +1,65 @@
 {
   "source": "build-metrics-manifest",
-  "updatedAt": "2026-08-21T13:25:33.118Z",
-  "rootName": "voice game",
-  "fileCount": 34,
-  "codeLines": 15589,
-  "sourceLines": 16360,
-  "sourceBytes": 616667,
+  "updatedAt": "2026-10-11T02:22:36.887Z",
+  "rootName": "app",
+  "fileCount": 32,
+  "codeLines": 13676,
+  "sourceLines": 14287,
+  "sourceBytes": 526378,
   "categories": {
     "脚本/配置": {
-      "fileCount": 14,
-      "codeLines": 1176,
-      "sourceLines": 1351
+      "fileCount": 13,
+      "codeLines": 754,
+      "sourceLines": 897
+    },
+    "其他工程文件": {
+      "fileCount": 7,
+      "codeLines": 729,
+      "sourceLines": 787
     },
     "服务端/API": {
       "fileCount": 3,
-      "codeLines": 6331,
-      "sourceLines": 6596
-    },
-    "其他工程文件": {
-      "fileCount": 1,
-      "codeLines": 164,
-      "sourceLines": 177
+      "codeLines": 4026,
+      "sourceLines": 4199
     },
     "前端界面": {
-      "fileCount": 16,
-      "codeLines": 7918,
-      "sourceLines": 8236
+      "fileCount": 9,
+      "codeLines": 8167,
+      "sourceLines": 8404
     }
   },
   "excludes": "不含声音素材、图片素材、题库数据、录音和依赖包",
   "files": [
+    ".hallmark/log.json",
+    ".hallmark/preflight.json",
+    "cloudflare.release.json",
     "cloudflare/light-game.mjs",
     "cloudflare/worker.mjs",
     "docs/CLOUD_RELEASE.md",
+    "docs/SHARED_ASSETS.md",
+    "docs/VOICE_ASR_SEQUENCE_AUDIT.md",
     "DX100-声音游戏.md",
     "package.json",
-    "public/admin-analytics.html",
-    "public/admin-analytics.js",
-    "public/admin-tags.html",
-    "public/admin-tags.js",
-    "public/admin-users.html",
-    "public/admin-users.js",
-    "public/admin.css",
-    "public/admin.html",
-    "public/admin.js",
     "public/app.js",
+    "public/changelog-classification.js",
     "public/index.html",
     "public/pcm-worklet.js",
     "public/shared/voice-asr-client.js",
     "public/style.css",
     "public/team.html",
     "public/team.js",
+    "public/tokens.css",
     "README.md",
     "scripts/build-cloudflare-pages.js",
     "scripts/build-cloudflare.js",
-    "scripts/release-cloudflare-pages.js",
     "scripts/sync-cloudflare-data.mjs",
     "scripts/sync-cloudflare-secrets.mjs",
+    "scripts/test-asr-session-ticket.mjs",
     "server.js",
+    "shared/asr-cloudflare-core.mjs",
     "shared/asr-health-worker.mjs",
-    "tools/asr-compare-baidu.js",
-    "tools/asr-compare-minimax.js",
-    "tools/asr-compare-minimax.md",
+    "shared/asr-session-ticket.mjs",
+    "shared/voice-game-contract.js",
     "tools/https-proxy.js",
     "wrangler.jsonc"
   ]

@@ -1,0 +1,20 @@
+{
+  "id": "20260826T091356Z",
+  "createdAt": "2026-08-26T09:14:16.865Z",
+  "protocolVersion": 1,
+  "projectName": "sound-detective",
+  "productionUrl": "https://sound-detective.pages.dev",
+  "version": "0.2.033-20260826",
+  "gitCommit": "3a5dd24",
+  "synced": {
+    "secrets": false,
+    "data": false,
+    "assets": false
+  },
+  "asrStatus": "ready",
+  "availableAsrProviders": [
+    "tencent-realtime-v2",
+    "doubao-streaming-v2",
+    "baidu-realtime"
+  ]
+}

@@ -5,16 +5,10 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const RELEASE_CONFIG = JSON.parse(fs.readFileSync(path.join(ROOT, "cloudflare.release.json"), "utf8"));
+const SHARED_ENV_FILE = path.resolve(process.env.VOICE_GAME_ENV_FILE || RELEASE_CONFIG.envFile);
 const DEFAULT_PAGES_PROJECT = "sound-detective";
-const SECRET_NAMES = [
-  "BAIDU_APP_ID",
-  "BAIDU_API_KEY",
-  "BAIDU_SECRET_KEY",
-  "TENCENT_ASR_APP_ID",
-  "TENCENT_ASR_SECRET_ID",
-  "TENCENT_ASR_SECRET_KEY",
-  "DOUBAO_ASR_API_KEY"
-];
+const SECRET_NAMES = [...new Set(RELEASE_CONFIG.secrets || [])];
 
 function loadEnvFile(file) {
   if (!fs.existsSync(file)) return;
@@ -53,7 +47,8 @@ function pagesProjectsFromArgs() {
 }
 
 function main() {
-  loadEnvFile(path.join(ROOT, ".env.cloud"));
+  if (!SECRET_NAMES.length) throw new Error("cloudflare.release.json 未配置 secrets");
+  loadEnvFile(SHARED_ENV_FILE);
   process.env.WRANGLER_LOG_PATH ||= path.join(ROOT, ".wrangler", "logs");
   const projects = pagesProjectsFromArgs();
   for (const name of SECRET_NAMES) {

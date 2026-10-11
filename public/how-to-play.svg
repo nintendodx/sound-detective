@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="450" viewBox="0 70 900 450" role="img" aria-labelledby="title desc">
   <title id="title">划火柴声音回答示例</title>
-  <desc id="desc">听到划火柴的声音后，可以回答划火柴或火柴。</desc>
+  <desc id="desc">听到划火柴的声音后，可以回答划火柴或火柴</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#fff9f1"/>
@@ -31,7 +31,6 @@
   <circle cx="820" cy="72" r="78" fill="#ff6a3d" opacity=".10"/>
   <circle cx="84" cy="448" r="92" fill="#2d6cf5" opacity=".09"/>
 
-  <text x="56" y="72" fill="#172033" font-family="PingFang SC, Microsoft YaHei, Arial, sans-serif" font-size="38" font-weight="900">听声音，直接说是什么</text>
   <g filter="url(#shadow)">
     <rect x="56" y="154" width="330" height="282" rx="28" fill="#fff"/>
     <rect x="434" y="154" width="410" height="282" rx="28" fill="#fff"/>

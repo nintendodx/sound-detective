@@ -4,30 +4,52 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>声音侦探</title>
-  <link rel="stylesheet" href="/public/style.css?v=0.2.012-20260821">
+  <link rel="stylesheet" href="/public/style.css?v=0.3.8-20261009">
 </head>
 <body>
   <main class="app">
     <section id="welcome">
       <button id="changelogOpen" class="version-chip" type="button" aria-label="查看更新日志" title="更新日志">
-        <span class="changelog-icon" aria-hidden="true">!</span>
-        <span id="appVersion">0.2.012-20260821</span>
+        <span class="changelog-icon" aria-hidden="true">i</span>
+        <span id="appVersion">0.3.8-20261009</span>
       </button>
       <a class="home-team-link" href="/team.html">Credits</a>
       <div class="hero">
         <h1 class="brand-title">
-          <img src="/public/brand-wordmark.svg?v=0.1088-20260818" alt="声音侦探">
+          <img src="/public/brand-wordmark.svg?v=0.3.8-20261009" alt="声音侦探">
         </h1>
+        <p class="hero-subtitle">听声音，说出它是什么</p>
+        <span class="good-things-beat" aria-hidden="true"><i></i><i></i><i></i></span>
       </div>
-      <img class="howto-image" src="/public/how-to-play.svg?v=0.1088-20260818" alt="划火柴声音回答示例">
+      <figure class="howto-card">
+        <img class="howto-image" src="/public/how-to-play-match-cartoon.png?v=0.3.8-20261009" alt="一只手正把火柴划过火柴盒侧面的磷面并点燃">
+        <figcaption class="howto-copy">
+          <span>听到“嚓”的摩擦声</span>
+          <small>你可以回答</small>
+          <span class="howto-answers"><strong>划火柴</strong><strong>火柴</strong></span>
+        </figcaption>
+      </figure>
+      <aside class="voice-ready-note" aria-label="游玩准备">
+        <span class="voice-ready-icon" aria-hidden="true"></span>
+        <p><strong>开始时请允许使用麦克风</strong><span>打开设备音量，戴耳机听得更清楚</span></p>
+      </aside>
       <div class="card">
         <label for="name">你的昵称</label>
-        <input class="input" id="name" maxlength="20" placeholder="例如：王牌侦探" autocomplete="nickname">
+        <input class="input" id="name" maxlength="20" placeholder="给自己起个名字" autocomplete="nickname" value="头号玩家">
         <button class="primary" id="start" type="button">开始挑战</button>
-        <button class="share history-open" id="historyOpen" type="button">过往成绩</button>
-        <button class="share ranking-open" id="rankingOpen" type="button">查看排名</button>
+        <button class="share history-open" id="historyOpen" type="button">历史成绩</button>
+        <button class="share ranking-open" id="rankingOpen" type="button">排行榜</button>
         <button class="share" data-feedback type="button">用户反馈</button>
       </div>
+      <a class="studio-link" href="https://stardream.studio/" target="_blank" rel="noopener noreferrer">
+        <img class="studio-link-favicon" src="https://stardream.studio/favicon-seedream.png" alt="" aria-hidden="true">
+        <span>stardream.studio</span>
+        <span class="studio-link-arrow" aria-hidden="true">↗</span>
+      </a>
+      <button class="good-things-easter-egg" id="goodThingsEasterEgg" type="button" aria-label="发现一个声音彩蛋" aria-describedby="goodThingsNote" title="声音彩蛋">
+        <img class="good-things-sketch" src="/public/good-things-vignette.png?v=0.3.8-20261009" alt="三个人围着小鼓聆听日常声音的原创插画">
+      </button>
+      <p class="good-things-note" id="goodThingsNote" aria-live="polite" hidden></p>
     </section>
 
     <section id="quiz" class="hidden">
@@ -44,13 +66,16 @@
           </div>
           <span id="soundStageText">准备播放</span>
         </div>
-        <div class="replay-zone" aria-label="问题音频">
+        <div class="replay-zone" aria-label="声音线索">
           <div class="playback-control">
             <div class="playback-copy">
-              <span>问题音频</span>
+              <span>声音线索</span>
               <strong id="playbackControlText">准备播放</strong>
             </div>
-            <button class="replay" id="replay" type="button">↻ 再听一次</button>
+            <div class="playback-actions">
+              <button class="skip-playback" id="skipPlayback" type="button" hidden>我猜到了！</button>
+              <button class="replay" id="replay" type="button">↻ 再听一次</button>
+            </div>
           </div>
         </div>
       </div>
@@ -73,11 +98,6 @@
               <button id="stopAnswerButton" class="stop-answer-button hidden" type="button"><span aria-hidden="true"></span>停止并提交</button>
               <button id="retryAnswerButton" class="retry-answer-button hidden" type="button">重新回答</button>
             </div>
-          </div>
-          <div class="switch hidden" id="switch">或手动输入判断</div>
-          <div id="textAnswer" class="hidden">
-            <input class="input" id="answerText" placeholder="输入你听到的物品或场景">
-            <button class="primary" id="submitText" type="button">提交判断</button>
           </div>
         </div>
       </div>
@@ -104,12 +124,11 @@
         </div>
       </div>
       <div class="card answer-review">
-        <b>本轮判断回顾</b>
+        <b>本轮答案</b>
         <div id="answerReview"></div>
       </div>
       <div class="card ranking">
-        <b>侦探排行榜 · 总分 TOP 5</b>
-        <p class="rank-note">仅展示至少完成 1 轮的玩家</p>
+        <b>排行榜</b>
         <div id="ranking"></div>
       </div>
       <button class="primary" id="again" type="button">再来 5 题</button>
@@ -128,15 +147,15 @@
           <p class="result-quote" id="completeQuote"></p>
           <b id="finishRank"></b>
           <p class="result-sub" id="finishText"></p>
+          <p class="good-things-line">生活里的声音，都是好东西</p>
         </div>
       </div>
       <div class="card answer-review">
-        <b>本轮判断回顾</b>
+        <b>本轮答案</b>
         <div id="completeAnswerReview"></div>
       </div>
       <div class="card ranking">
-        <b>完成全部挑战的侦探</b>
-        <p class="rank-note">按累计得分排序，当前侦探置顶</p>
+        <b>完成榜</b>
         <div id="completeRanking"></div>
       </div>
       <button class="primary" id="completeAgain" type="button">重新开始</button>
@@ -148,8 +167,8 @@
     <div class="modal-card changelog-card">
       <div class="modal-head">
         <div>
-          <span>Demo 更新日志</span>
-          <b id="changelogTitle">0.2.012-20260821</b>
+          <span>更新日志</span>
+          <b id="changelogTitle">0.3.8-20261009</b>
         </div>
         <button id="changelogClose" type="button" aria-label="关闭更新日志">×</button>
       </div>
@@ -161,7 +180,7 @@
     <div class="modal-card history-card">
       <div class="modal-head">
         <div>
-          <b id="historyTitle">你的游玩记录</b>
+          <b id="historyTitle">历史成绩</b>
         </div>
         <button id="historyClose" type="button" aria-label="关闭过往成绩">×</button>
       </div>
@@ -173,13 +192,13 @@
     <div class="modal-card ranking-card">
       <div class="modal-head">
         <div>
-          <span>侦探排行榜</span>
-          <b id="rankingTitle">总分 TOP10</b>
+          <span>累计答对</span>
+          <b id="rankingTitle">排行榜</b>
         </div>
         <button id="rankingClose" type="button" aria-label="关闭排名">×</button>
       </div>
       <div class="history-content ranking-content" id="rankingContent">
-        <p class="rank-note">仅展示至少完成 1 轮的玩家</p>
+        <div class="ranking-columns" aria-hidden="true"><span>名次</span><span>玩家</span><span>答对</span></div>
         <div id="homeRanking"></div>
       </div>
     </div>
@@ -189,7 +208,8 @@
     <div class="modal-card feedback-card"><div class="modal-head"><div><span>声音侦探</span><b id="feedbackTitle">用户反馈</b></div><button id="feedbackClose" type="button" aria-label="关闭">×</button></div><form id="feedbackForm" class="feedback-form"><textarea id="feedbackContent" maxlength="2000" rows="6" required placeholder="请告诉我们你的想法或遇到的问题"></textarea><button id="feedbackSubmit" class="primary" type="submit">提交反馈</button></form></div>
   </div>
   <div class="toast hidden" id="toast"></div>
-  <script src="/public/shared/voice-asr-client.js?v=0.2.012-20260821"></script>
-  <script src="/public/app.js?v=0.2.012-20260821"></script>
+  <script src="/public/shared/voice-asr-client.js?v=0.3.8-20261009"></script>
+  <script src="/public/changelog-classification.js?v=0.3.8-20261009"></script>
+  <script src="/public/app.js?v=0.3.8-20261009"></script>
 </body>
 </html>

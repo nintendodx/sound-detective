@@ -1,0 +1,27 @@
+{
+  "id": "20260827T035631Z",
+  "createdAt": "2026-08-27T03:57:56.688Z",
+  "protocolVersion": 1,
+  "projectName": "sound-detective",
+  "productionUrl": "https://sound-detective.pages.dev",
+  "version": "0.2.035-20260827",
+  "gitCommit": "3a5dd24",
+  "synced": {
+    "secrets": false,
+    "data": false,
+    "assets": false
+  },
+  "asrModules": {
+    "asr-cloudflare-core.mjs": "4bde24c1f8eb53d3c4d7fe7c00cf78d1ac81d5261b6c585858e64dfd14dca3bc",
+    "asr-health-worker.mjs": "941e37d5aefd44fd7a8c7cca7ba4d2fcf02dc871ab01a287c0de33885c766f11",
+    "asr-node.cjs": "f5d38ee9c1d5d531a8b5eba3fbb5953cfe3e7f1ceffd3209463af20da6f9f680",
+    "asr-session-ticket.mjs": "d8d3e23850ef22467afc9d49a1477207f81eff20ad671c82c7ba0de10cd60d58",
+    "voice-asr-client.js": "15b3f254d40e3c04a9945bfbfdd4df37a6545faa4159e5e35fedd3b6860809ac"
+  },
+  "asrStatus": "ready",
+  "availableAsrProviders": [
+    "tencent-realtime-v2",
+    "doubao-streaming-v2",
+    "baidu-realtime"
+  ]
+}

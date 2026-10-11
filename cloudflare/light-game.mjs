@@ -1,32 +1,36 @@
 import { Buffer } from "node:buffer";
-import { gzipSync, gunzipSync } from "node:zlib";
-import { createWorkerAsrHealthService, healthyProviderIds } from "../shared/asr-health-worker.mjs";
+import { healthyProviderIds } from "../shared/asr-health-worker.mjs";
+import { createAsrSessionTicket, verifyAsrSessionTicket } from "../shared/asr-session-ticket.mjs";
+import * as sharedCloudflareAsr from "../shared/asr-cloudflare-core.mjs";
+import "../shared/voice-game-contract.js";
+
+const voiceGameContract = globalThis.VoiceGameContract;
 
 const ANALYTICS_MAX_EVENTS = 50000;
-const DEFAULT_USER_NAMES = new Set(["匿名玩家", "匿名", "游客", "未命名", "无名", "无名侦探"]);
-const ASR_PROVIDER_LABELS = Object.freeze({
-  "tencent-realtime-v2": "腾讯实时语音识别 2.0",
-  "doubao-streaming-v2": "豆包双向流式 2.0",
-  "baidu-realtime": "百度实时语音识别"
-});
+const SOUND_EVENTS_KEY = "games/sound/events";
+const PERSISTED_DIAGNOSTIC_EVENTS = new Set(["answer_response", "round_complete", "library_complete", "asr_retry"]);
+
+function shouldPersistDiagnosticEvent(type) {
+  const value = String(type || "").slice(0, 80).toLowerCase();
+  return PERSISTED_DIAGNOSTIC_EVENTS.has(value)
+    || /(?:error|failed|failure|timeout|permission|denied|dismissed|blocked|unavailable|no[_-]?speech|empty|retry_required)$/.test(value);
+}
+const DEFAULT_USER_NAMES = new Set(["匿名玩家", "匿名", "游客", "未命名", "无名", "无名侦探", "头号玩家"]);
+const ASR_PROVIDER_LABELS = sharedCloudflareAsr.ASR_PROVIDER_LABELS;
 
 const SEMANTIC_INTENTS = {
-  "sound-breaking-a-cup": ["杯子摔碎", "杯子碎了", "打碎杯子", "玻璃杯碎", "玻璃碎", "杯子破了", "碎裂", "摔杯子", "砸杯子"],
+  "sound-breaking-a-cup": ["杯子摔碎", "杯子碎了", "打碎杯子", "玻璃杯碎", "玻璃碎", "杯子破了", "碎裂", "摔杯子", "砸杯子", "打碎玻璃", "玻璃打碎", "阿碎玻璃"],
   "sound-door-chime": ["门铃", "按门铃", "门铃响", "铃声", "叮咚", "有人按门铃"],
-  "sound-entering-a-house": ["进门", "开门进屋", "开门进来", "开门回家", "回家开门", "进屋", "入门", "房门打开"],
+  "sound-entering-a-house": ["进门", "开门进屋", "开门进来", "开门回家", "回家开门", "进屋", "入门", "房门打开", "打开木门"],
   "sound-knocking-an-iron-door": ["敲铁门", "敲门", "拍门", "门响", "铁门响", "铁门声", "有人敲门", "敲门声"],
   "sound-lighting-a-match": ["划火柴", "擦火柴", "点火柴", "火柴点燃", "点燃火柴", "火柴", "划着火柴"],
   "sound-out-of-a-toilet": ["马桶冲水", "冲马桶", "厕所冲水", "卫生间冲水", "抽水马桶", "冲水", "上厕所冲水", "马桶"],
   "sound-scissors": ["剪刀", "剪东西", "剪纸", "裁剪", "剪开", "用剪刀", "剪刀剪"],
   "sound-vinyl-bag": ["塑料袋", "揉塑料袋", "搓塑料袋", "塑料袋揉搓", "袋子揉搓", "包装袋", "塑料包装", "塑料声"],
-  "sound-writing-in-a-pen": ["写字", "用笔写字", "笔写字", "钢笔写字", "铅笔写字", "笔划纸", "书写", "写东西", "纸上写字", "黑板上写字", "板书", "粉笔写字"]
+  "sound-writing-in-a-pen": ["写字", "用笔写字", "笔写字", "钢笔写字", "铅笔写字", "笔划纸", "书写", "写东西", "纸上写字", "黑板上写字", "板书", "粉笔写字"],
+  "sound-small-car-engine": ["汽车发动机", "汽车发动", "发动汽车", "引擎发动", "汽车引擎"]
 };
 
-const FILLER_PATTERNS = [
-  "这是", "这个是", "应该是", "可能是", "好像是", "听起来像", "我觉得", "感觉是", "就是",
-  "有点像", "像是", "大概是", "应该就是", "一个", "一种", "有人在", "有人", "正在",
-  "发出来的", "发出的", "传来的", "的声音", "这个声音", "声音", "音效", "里面", "外面"
-];
 
 function rows(input) {
   return Array.isArray(input) ? input : [];
@@ -41,8 +45,8 @@ function noStoreHeaders(extra = {}) {
   };
 }
 
-function json(data, status = 200) {
-  return Response.json(data, { status, headers: noStoreHeaders() });
+function json(data, status = 200, headers = {}) {
+  return Response.json(data, { status, headers: noStoreHeaders(headers) });
 }
 
 function uuid() {
@@ -58,10 +62,12 @@ function envValue(env, key, fallback = "") {
   return value === undefined || value === null || String(value) === "" ? fallback : value;
 }
 
-function soundAsrHotwords(data) {
+function soundAsrHotwords(data, soundIds = []) {
   const words = [];
+  const selected = new Set(rows(soundIds).map(String));
   for (const sound of rows(data?.sounds)) {
     if (!sound || sound.enabled === false) continue;
+    if (selected.size && !selected.has(String(sound.id))) continue;
     if (sound.name) words.push(sound.name);
     for (const tag of [...rows(sound.tags), ...rows(sound.aliases)]) words.push(tag);
   }
@@ -69,254 +75,12 @@ function soundAsrHotwords(data) {
   return [...new Set(words.map((word) => String(word || "").trim()).filter(Boolean))].slice(0, 300);
 }
 
-function baiduRealtimeConfig(env) {
-  const configured = Boolean(envValue(env, "BAIDU_APP_ID") && envValue(env, "BAIDU_API_KEY"));
-  const enabledByOperator = !/^(0|false|no|off)$/i.test(String(envValue(env, "BAIDU_REALTIME_ASR_ENABLED", envValue(env, "BAIDU_REALTIME_ENABLED", "true"))).trim());
-  return {
-    configured,
-    enabled: configured && enabledByOperator,
-    disabledReason: configured ? "百度实时识别已由配置停用" : "缺少百度实时识别密钥",
-    appId: envValue(env, "BAIDU_APP_ID"),
-    appKey: envValue(env, "BAIDU_API_KEY"),
-    endpoint: envValue(env, "BAIDU_REALTIME_ASR_ENDPOINT", "wss://vop.baidu.com/realtime_asr"),
-    devPid: Number(envValue(env, "BAIDU_REALTIME_ASR_DEV_PID", "15372")),
-    lmId: Number(envValue(env, "BAIDU_REALTIME_ASR_LM_ID", "0")),
-    cuid: envValue(env, "BAIDU_ASR_CUID", "voice-detective-demo"),
-    sampleRate: 16000,
-    format: "pcm"
-  };
-}
-
-function tencentRealtimeConfig(env) {
-  const noiseValue = String(envValue(env, "TENCENT_ASR_NOISE_THRESHOLD")).trim();
-  const credentials = Boolean(
-    (envValue(env, "TENCENT_ASR_APP_ID") || envValue(env, "TENCENT_APP_ID")) &&
-    (envValue(env, "TENCENT_ASR_SECRET_ID") || envValue(env, "TENCENT_SECRET_ID")) &&
-    (envValue(env, "TENCENT_ASR_SECRET_KEY") || envValue(env, "TENCENT_SECRET_KEY"))
-  );
-  const tencentEnabled = !/^(0|false|no|off)$/i.test(String(envValue(env, "TENCENT_ASR_ENABLED", "true")).trim());
-  return {
-    configured: credentials,
-    enabled: credentials && tencentEnabled,
-    disabledReason: credentials ? "腾讯实时识别已由配置停用" : "缺少腾讯实时识别密钥",
-    appId: envValue(env, "TENCENT_ASR_APP_ID") || envValue(env, "TENCENT_APP_ID"),
-    secretId: envValue(env, "TENCENT_ASR_SECRET_ID") || envValue(env, "TENCENT_SECRET_ID"),
-    secretKey: envValue(env, "TENCENT_ASR_SECRET_KEY") || envValue(env, "TENCENT_SECRET_KEY"),
-    endpoint: envValue(env, "TENCENT_ASR_ENDPOINT", "wss://asr.cloud.tencent.com/asr/v2"),
-    engineModelType: envValue(env, "TENCENT_ASR_ENGINE_MODEL_TYPE", "16k_zh_en_speaker"),
-    vadSilenceTime: Number(envValue(env, "TENCENT_ASR_VAD_SILENCE_TIME", "800")),
-    noiseThreshold: noiseValue === "" ? null : Number(noiseValue),
-    hotwordId: envValue(env, "TENCENT_ASR_HOTWORD_ID"),
-    hotwordLimit: Math.min(128, Math.max(20, Number(envValue(env, "TENCENT_ASR_HOTWORD_LIMIT", envValue(env, "ASR_REALTIME_HOTWORD_LIMIT", "128"))))),
-    sampleRate: 16000,
-    format: "pcm"
-  };
-}
-
-function doubaoRealtimeConfig(env) {
-  return {
-    enabled: Boolean(envValue(env, "DOUBAO_ASR_API_KEY") || envValue(env, "VOLCENGINE_ASR_API_KEY")) && envValue(env, "DOUBAO_ASR_ENABLED", "true") !== "false",
-    apiKey: envValue(env, "DOUBAO_ASR_API_KEY") || envValue(env, "VOLCENGINE_ASR_API_KEY"),
-    endpoint: envValue(env, "DOUBAO_ASR_ENDPOINT", "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel_async"),
-    resourceId: envValue(env, "DOUBAO_ASR_RESOURCE_ID", "volc.bigasr.sauc.duration"),
-    endWindowSize: Number(envValue(env, "DOUBAO_ASR_END_WINDOW_SIZE", "800")),
-    forceToSpeechTime: Number(envValue(env, "DOUBAO_ASR_FORCE_TO_SPEECH_TIME", "1000")),
-    sampleRate: 16000,
-    format: "pcm"
-  };
-}
-
-function realtimeProviderConfigs(env) {
-  return {
-    "tencent-realtime-v2": tencentRealtimeConfig(env),
-    "doubao-streaming-v2": doubaoRealtimeConfig(env),
-    "baidu-realtime": baiduRealtimeConfig(env)
-  };
-}
-
-function availableAsrProviders(env) {
-  const configs = realtimeProviderConfigs(env);
-  return Object.keys(ASR_PROVIDER_LABELS).filter((provider) => configs[provider]?.enabled);
-}
-
-function randomAsrProvider(env) {
-  const providers = availableAsrProviders(env);
-  return providers.length ? providers[Math.floor(Math.random() * providers.length)] : "";
-}
-
-function base64FromBytes(bytes) {
-  let binary = "";
-  for (const value of bytes) binary += String.fromCharCode(value);
-  return btoa(binary);
-}
-
-async function hmacSha1Base64(secret, text) {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(text));
-  return base64FromBytes(new Uint8Array(signature));
-}
-
-async function tencentRealtimeUrl(env, config, hotwords = []) {
-  const timestamp = Math.floor(Date.now() / 1000);
-  const params = {
-    secretid: config.secretId,
-    engine_model_type: config.engineModelType,
-    timestamp,
-    expired: timestamp + 120,
-    nonce: Math.floor(100000 + Math.random() * 900000),
-    voice_id: uuid(),
-    voice_format: 1,
-    result_mod: 1,
-    speaker_diarization: 0,
-    needvad: 1,
-    vad_silence_time: config.vadSilenceTime,
-    reinforce_hotword: 1
-  };
-  const limitedHotwords = [...new Set(hotwords.map((word) => String(word || "").replace(/[^\p{L}\p{N}\s·.'-]/gu, " ").replace(/\s+/g, " ").trim()).filter(Boolean))].slice(0, Math.min(128, config.hotwordLimit || hotwords.length));
-  if (limitedHotwords.length) params.hotword_list = limitedHotwords.map((word) => `${word}|11`).join(",");
-  if (Number.isFinite(config.noiseThreshold)) params.noise_threshold = config.noiseThreshold;
-  if (config.hotwordId) {
-    params.hotword_id = config.hotwordId;
-    delete params.hotword_list;
-  }
-  const query = Object.keys(params).sort().map((key) => `${key}=${params[key]}`).join("&");
-  const endpoint = new URL(config.endpoint);
-  const signTarget = `${endpoint.host}/asr/v2/${config.appId}?${query}`;
-  const signature = await hmacSha1Base64(config.secretKey, signTarget);
-  return `${endpoint.protocol}//${endpoint.host}/asr/v2/${config.appId}?${query}&signature=${encodeURIComponent(signature)}`;
-}
-
-function bufferToArrayBuffer(buffer) {
-  return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
-}
-
-async function arrayBufferFromWsData(data) {
-  if (data instanceof ArrayBuffer) return data;
-  if (ArrayBuffer.isView(data)) return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
-  if (typeof data === "string") return new TextEncoder().encode(data).buffer;
-  if (data?.arrayBuffer) return data.arrayBuffer();
-  return bufferToArrayBuffer(Buffer.from(data || ""));
-}
-
-function doubaoHeader(messageType, flags, serialization = 1, compression = 1) {
-  return Buffer.from([0x11, (messageType << 4) | flags, (serialization << 4) | compression, 0]);
-}
-
-function doubaoRequest(messageType, sequence, payload, last = false, jsonPayload = false) {
-  const data = Buffer.isBuffer(payload) ? payload : Buffer.from(jsonPayload ? JSON.stringify(payload) : payload || "");
-  const compressed = gzipSync(data);
-  const header = doubaoHeader(messageType, last ? 3 : 1, 1, 1);
-  const packet = Buffer.alloc(header.length + 8 + compressed.length);
-  header.copy(packet, 0);
-  packet.writeInt32BE(last ? -Math.abs(sequence) : sequence, 4);
-  packet.writeUInt32BE(compressed.length, 8);
-  compressed.copy(packet, 12);
-  return bufferToArrayBuffer(packet);
-}
-
-function parseDoubaoResponse(input) {
-  const message = Buffer.from(input);
-  if (message.length < 4) throw Error("豆包响应包不完整");
-  const headerBytes = (message[0] & 0x0f) * 4;
-  if (headerBytes < 4 || headerBytes > message.length) throw Error("豆包响应包头无效");
-  const messageType = message[1] >> 4;
-  const flags = message[1] & 0x0f;
-  const serialization = message[2] >> 4;
-  const compression = message[2] & 0x0f;
-  let offset = headerBytes;
-  let sequence = 0;
-  let last = Boolean(flags & 0x02);
-  let code = 0;
-  const requireBytes = (size) => {
-    if (offset + size > message.length) throw Error("豆包响应字段不完整");
-  };
-  if (flags & 0x01) {
-    requireBytes(4);
-    sequence = message.readInt32BE(offset);
-    offset += 4;
-  }
-  if (flags & 0x04) {
-    requireBytes(4);
-    offset += 4;
-  }
-  if (messageType === 9) {
-    requireBytes(4);
-    offset += 4;
-  } else if (messageType === 15) {
-    requireBytes(8);
-    code = message.readInt32BE(offset);
-    offset += 8;
-  }
-  let payload = message.subarray(offset);
-  if (compression === 1 && payload.length) payload = gunzipSync(payload);
-  let body = null;
-  if (serialization === 1 && payload.length) body = JSON.parse(payload.toString("utf8"));
-  return { code, sequence, last, body };
-}
-
-function doubaoStartPayload(config, uid, hotwords = []) {
-  return {
-    user: { uid: String(uid || "voice-detective").slice(0, 64) },
-    audio: { format: "pcm", codec: "raw", rate: config.sampleRate, bits: 16, channel: 1 },
-    request: {
-      model_name: "bigmodel",
-      enable_nonstream: true,
-      enable_itn: false,
-      enable_punc: false,
-      enable_ddc: false,
-      show_utterances: true,
-      result_type: "full",
-      end_window_size: config.endWindowSize,
-      force_to_speech_time: config.forceToSpeechTime,
-      corpus: { context: JSON.stringify({ hotwords: [...new Set(hotwords)].slice(0, 200).map((word) => ({ word })) }) }
-    }
-  };
-}
-
-async function doubaoRealtimeSocket(config) {
-  const endpoint = new URL(config.endpoint);
-  if (endpoint.protocol === "wss:") endpoint.protocol = "https:";
-  const response = await fetch(endpoint.toString(), {
-    headers: {
-      Upgrade: "websocket",
-      "X-Api-Key": config.apiKey,
-      "X-Api-Resource-Id": config.resourceId,
-      "X-Api-Request-Id": uuid(),
-      "X-Api-Sequence": "-1"
-    }
-  });
-  if (response.status !== 101 || !response.webSocket) {
-    const body = await response.text().catch(() => "");
-    throw Error(body.slice(0, 160) || `豆包握手失败 ${response.status}`);
-  }
-  response.webSocket.binaryType = "arraybuffer";
-  response.webSocket.accept();
-  return response.webSocket;
-}
-
-const soundAsrHealth = createWorkerAsrHealthService({
-  labels:ASR_PROVIDER_LABELS,
-  configs:realtimeProviderConfigs,
-  connect:async (provider, config, env, hotwords) => {
-    if (provider === "baidu-realtime") {
-      const endpoint = new URL(config.endpoint);
-      endpoint.searchParams.set("sn", uuid());
-      return new WebSocket(endpoint.toString());
-    }
-    if (provider === "tencent-realtime-v2") return new WebSocket(await tencentRealtimeUrl(env, config, hotwords));
-    if (provider === "doubao-streaming-v2") return doubaoRealtimeSocket(config);
-    throw Error("未知语音识别服务");
-  },
-  baiduStart:config => {
-    const data = { appid:Number(config.appId), appkey:config.appKey, dev_pid:config.devPid, cuid:config.cuid, format:config.format, sample:config.sampleRate };
-    if (config.lmId) data.lm_id = config.lmId;
-    return JSON.stringify({ type:"START", data });
-  },
-  doubaoStart:(config, hotwords) => doubaoRequest(1, 1, doubaoStartPayload(config, "voice-detective-health", hotwords), false, true),
-  doubaoFinish:() => doubaoRequest(2, 2, Buffer.alloc(3200), true, false),
-  parseDoubao:async data => parseDoubaoResponse(await arrayBufferFromWsData(data)),
-  textFromData:textFromWsData
-});
+const SOUND_ASR_RUNTIME = { gameId:"sound", cuid:"voice-detective-demo", labels:ASR_PROVIDER_LABELS };
+function realtimeProviderConfigs(env) { return sharedCloudflareAsr.realtimeProviderConfigs(env, SOUND_ASR_RUNTIME); }
+function availableAsrProviders(env) { return sharedCloudflareAsr.availableAsrProviders(env, SOUND_ASR_RUNTIME); }
+function tencentRealtimeConfig(env) { return realtimeProviderConfigs(env)["tencent-realtime-v2"]; }
+async function tencentRealtimeUrl(env, config, hotwords = []) { return sharedCloudflareAsr.tencentRealtimeUrl(config, hotwords, () => uuid()); }
+const soundAsrHealth = sharedCloudflareAsr.createSharedAsrHealthService({ ...SOUND_ASR_RUNTIME, healthUid:"voice-detective-health", makeId:() => uuid() });
 
 function timeValue(value) {
   const t = new Date(value || 0).getTime();
@@ -528,8 +292,28 @@ function ensureStoreShape(data) {
 }
 
 async function readStore(env) {
-  const data = await env.SOUND_DETECTIVE_DATA?.get("store.json", "json");
-  return ensureStoreShape(data);
+  const [legacy, central] = await Promise.all([
+    env.SOUND_DETECTIVE_DATA?.get("store.json", "json"),
+    env.ADMIN_HUB_DATA?.get("games/sound/store.json", "json")
+  ]);
+  if (legacy && central) return mergeStoreData(legacy, central);
+  return ensureStoreShape(central || legacy);
+}
+
+async function readAnalyticsJournal(env) {
+  const [legacy, central] = await Promise.all([
+    env.SOUND_DETECTIVE_DATA?.get("events.json", "json"),
+    env.ADMIN_HUB_DATA?.get(SOUND_EVENTS_KEY, "json")
+  ]);
+  return byIdMerge(rows(legacy), rows(central), (a, b) => ({ ...a, ...b }))
+    .sort((a, b) => timeValue(a.at) - timeValue(b.at))
+    .slice(-ANALYTICS_MAX_EVENTS);
+}
+
+async function writeAnalyticsJournal(env, events) {
+  if (!env.ADMIN_HUB_DATA) throw new Error("缺少 ADMIN_HUB_DATA KV 绑定");
+  const serialized = JSON.stringify(rows(events).slice(-ANALYTICS_MAX_EVENTS));
+  await env.ADMIN_HUB_DATA.put(SOUND_EVENTS_KEY, serialized);
 }
 
 function answerHistoryId(soundId, sessionId, at, answer) {
@@ -775,10 +559,11 @@ function mergeStoreData(base = {}, incoming = {}) {
 }
 
 async function writeStore(env, data, options = {}) {
-  if (!env.SOUND_DETECTIVE_DATA) throw new Error("缺少 Cloudflare KV 绑定 SOUND_DETECTIVE_DATA");
+  if (!env.ADMIN_HUB_DATA) throw new Error("缺少 ADMIN_HUB_DATA KV 绑定");
   const latest = options.replace ? null : await readStore(env);
   const next = latest ? mergeStoreData(latest, data) : normalizeStoreForWrite(data);
-  await env.SOUND_DETECTIVE_DATA.put("store.json", JSON.stringify(next));
+  const serialized = JSON.stringify(next);
+  await env.ADMIN_HUB_DATA.put("games/sound/store.json", serialized);
   return next;
 }
 
@@ -1243,99 +1028,15 @@ function selectRoundSounds(user, data, size = 5) {
   };
 }
 
-function normalize(text = "") {
-  return String(text || "").toLowerCase()
-    .replace(/[門]/g, "门").replace(/[鈴]/g, "铃").replace(/[進]/g, "进").replace(/[鐵]/g, "铁")
-    .replace(/[寫]/g, "写").replace(/[筆]/g, "笔").replace(/[廁厠]/g, "厕").replace(/[馬]/g, "马")
-    .replace(/[滿]/g, "满").replace(/[沖]/g, "冲").replace(/[劃]/g, "划").replace(/[廳]/g, "厅")
-    .replace(/沫桶|满桶/g, "马桶").replace(/充水/g, "冲水").replace(/塑料代/g, "塑料袋")
-    .replace(/钢比|刚笔/g, "钢笔").replace(/建刀/g, "剪刀").replace(/划柴|画火柴/g, "划火柴")
-    .replace(/[\s，。！？、,.!?；;：:“”"'‘’（）()【】\[\]-]/g, "");
-}
-
-function collapseRepeatedText(text = "") {
-  let out = text;
-  for (let size = 2; size <= 8; size++) {
-    const re = new RegExp(`(.{${size}})\\1+`, "g");
-    out = out.replace(re, "$1");
-  }
-  return out;
-}
-
-function semanticText(text = "") {
-  let out = normalize(text);
-  for (const pattern of FILLER_PATTERNS.map(normalize).filter(Boolean)) out = out.replaceAll(pattern, "");
-  return collapseRepeatedText(out);
-}
-
-function isNegatedAt(text, index) {
-  const prefix = text.slice(Math.max(0, index - 5), index);
-  return /不是|不像|没有|沒|不对|不太像|别是/.test(prefix);
-}
-
-function affirmativeText(text) {
-  return text
-    .replace(/不是(.+?)是/g, "")
-    .replace(/不像(.+?)是/g, "")
-    .replace(/不太像(.+?)是/g, "")
-    .replace(/没有(.+?)是/g, "")
-    .replace(/不是.+$/, "")
-    .replace(/不像.+$/, "")
-    .replace(/不太像.+$/, "")
-    .replace(/没有.+$/, "");
-}
-
-function allSemanticTerms(sound) {
-  return [...new Set([sound.name, ...rows(sound.tags), ...rows(sound.aliases), ...rows(SEMANTIC_INTENTS[sound.id])]
-    .map(semanticText)
-    .filter(Boolean))];
-}
-
-function uniqueTerms(sound) {
-  return allSemanticTerms(sound).filter((term) => term.length >= 2);
-}
-
-function uniqueExactTerms(sound) {
-  return allSemanticTerms(sound);
-}
-
-function charOverlap(a, b) {
-  const aa = [...new Set([...a])];
-  const bb = new Set([...b]);
-  return aa.length ? aa.filter((c) => bb.has(c)).length / aa.length : 0;
-}
-
-function semanticMatch(sound, answer) {
-  const answerText = affirmativeText(semanticText(answer));
-  const exactTerms = uniqueExactTerms(sound);
-  const terms = uniqueTerms(sound).sort((a, b) => b.length - a.length);
-  if (!answerText) return { ok: false, score: 0, type: "empty", matched: "" };
-  for (const term of exactTerms.filter((item) => item.length === 1)) {
-    if (answerText === term && !isNegatedAt(answerText, 0)) return { ok: true, score: 1, type: "single_term_exact", matched: term };
-  }
-  for (const term of terms) {
-    const at = answerText.indexOf(term);
-    if (at >= 0 && !isNegatedAt(answerText, at)) return { ok: true, score: 1, type: "term_contains", matched: term };
-    const reverse = term.indexOf(answerText);
-    if (answerText.length >= 2 && reverse >= 0 && !isNegatedAt(answerText, 0)) return { ok: true, score: 0.92, type: "answer_contains", matched: term };
-  }
-  let best = { score: 0, term: "" };
-  for (const term of terms.filter((item) => item.length >= 3)) {
-    const at = answerText.indexOf(term);
-    if (at >= 0 && isNegatedAt(answerText, at)) continue;
-    const score = charOverlap(term, answerText);
-    if (score > best.score) best = { score, term };
-  }
-  const ok = best.score >= 0.72 && answerText.length >= 2;
-  return { ok, score: Number(best.score.toFixed(2)), type: ok ? "semantic_overlap" : "no_match", matched: best.term };
-}
-
 function judgeAnswer(sound, answer) {
-  const match = semanticMatch(sound, answer);
+  const judgment = voiceGameContract.judgeAnswer({ gameId:"sound", transcript:answer, question:{ name:sound.name, tags:sound.tags, aliases:sound.aliases, semanticIntents:rows(SEMANTIC_INTENTS[sound.id]) } });
+  const hit = judgment.matches[0];
+  const match = { ok:judgment.correct, score:Number(hit?.confidence || 0), type:hit?.type || judgment.reason, matched:hit?.matched || "" };
   return {
-    correct: match.ok,
-    message: match.ok ? "答对了！你听得很准。" : `差一点，正确答案是「${sound.name}」`,
-    match
+    correct: judgment.correct,
+    message: judgment.correct ? "答对了！你听得很准。" : `差一点，正确答案是「${sound.name}」`,
+    match,
+    judgment
   };
 }
 
@@ -1363,7 +1064,8 @@ function recordJudgedAnswer(data, session, sound, answer, options = {}) {
   if (!session || !user || !sound) return { ok: false, error: "题目不存在" };
   if (rows(session.answers).some((item) => item && !item.removed && item.soundId === sound.id)) return { ok: false, duplicate: true, user };
   const text = String(answer || "").trim().slice(0, 500);
-  const result = text ? judgeAnswer(sound, text) : { correct: false, message: "没有识别到文字", match: { ok: false, score: 0, type: "empty", matched: "" } };
+  const result = judgeAnswer(sound, text);
+  if (!text) result.message = "没有识别到文字";
   const answeredAt = options.at || new Date().toISOString();
   const answerRecord = {
     soundId: sound.id,
@@ -1372,6 +1074,7 @@ function recordJudgedAnswer(data, session, sound, answer, options = {}) {
     at: answeredAt,
     inputMode: options.inputMode || "text"
   };
+  answerRecord.judgment = result.judgment;
   if (options.provider) answerRecord.provider = String(options.provider).slice(0, 80);
   if (options.asrProvider) answerRecord.asrProvider = String(options.asrProvider).slice(0, 80);
   if (Number(options.asrDurationMs || 0) > 0) answerRecord.asrDurationMs = Number(options.asrDurationMs || 0);
@@ -1511,7 +1214,22 @@ async function handleGameStart(request, env, url) {
   let user = getUserById(data, String(input.userId || ""));
   if (!user && input.deviceId) user = upsertRealUser(data, input, request);
   if (!user) return json({ error: "用户不存在" }, 404);
+  const requestedName = cleanUserName(input.name);
+  const userNameChanged = Boolean(requestedName && user.name !== requestedName);
+  if (userNameChanged) user.name = requestedName;
+  normalizeUserIdentity(user, [input.deviceId]);
   applyUserClientInfo(user, input, request);
+
+  const startToken = String(input.startToken || "").trim().slice(0, 100);
+  if (startToken) {
+    const existing = sessionsFor(data).find((session) => session.userId === user.id && session.startToken === startToken);
+    if (existing) {
+      if (userNameChanged) await writeStore(env, data);
+      const questions = rows(existing.soundIds).map((id) => data.sounds.find((sound) => sound.id === id)).filter(Boolean);
+      const asrTicket = await createAsrSessionTicket(env, { sessionId:existing.id, provider:existing.asrProvider, questionIds:existing.soundIds });
+      return json({ sessionId:existing.id, questions:questions.map(publicSound), playthrough:existing.playthrough || 1, asrProvider:existing.asrProvider || "", asrProviderLabel:existing.asrProviderLabel || "", asrTicket, reused:true });
+    }
+  }
 
   const sessionList = sessionsFor(data);
   const pending = activeLibraryCompletionPending(user);
@@ -1536,9 +1254,10 @@ async function handleGameStart(request, env, url) {
   const health = await soundAsrHealth.check(env, soundAsrHotwords(data));
   const providers = healthyProviderIds(health, input.availableAsrProviders);
   if (!providers.length) return json({ error:"当前没有可用的实时语音识别服务", asrHealth:health }, 503);
-  const asrProvider = providers[Math.floor(Math.random() * providers.length)];
+  const asrProvider = voiceGameContract.selectAsrProvider(providers);
   const session = {
     id: uuid(),
+    startToken,
     userId: user.id,
     soundIds: questions.map((sound) => sound.id),
     answers: [],
@@ -1566,33 +1285,8 @@ async function handleGameStart(request, env, url) {
   });
   data.sessions.push(session);
   await writeStore(env, data);
-  return json({ sessionId: session.id, questions: questions.map(publicSound), playthrough, asrProvider, asrProviderLabel: session.asrProviderLabel });
-}
-
-async function handleAnswerPost(request, env) {
-  const input = await readJsonBody(request);
-  const data = await readStore(env);
-  const session = getSessionById(data, input.sessionId);
-  const user = session && getUserById(data, session.userId);
-  const sound = session && data.sounds.find((item) => item.id === input.soundId);
-  if (!session || !user || !sound || !rows(session.soundIds).includes(sound.id)) return json({ error: "题目不存在" }, 404);
-  const existingAnswer = rows(session.answers).find((answer) => answer && !answer.removed && answer.soundId === sound.id);
-  if (existingAnswer) {
-    appendMonitor(session, "server", "answer_duplicate_accepted", "本题已记录，后端按幂等成功返回", { soundId: input.soundId });
-    await writeStore(env, data);
-    return json({ ok: true, duplicate: true, answer: existingAnswer.answer || "" });
-  }
-  appendMonitor(session, "server", "answer_received", "后端已收到文字答案", {
-    soundId: sound.id,
-    answer: String(input.answer || "").slice(0, 80),
-    answerLength: String(input.answer || "").length
-  });
-  const recorded = recordJudgedAnswer(data, session, sound, input.answer, { inputMode: input.inputMode || "text" });
-  if (!recorded.ok && recorded.duplicate) return json({ ok: true, duplicate: true, answer: String(input.answer || "") });
-  if (!recorded.ok) return json({ error: recorded.error || "题目不存在" }, 404);
-  appendMonitor(session, "server", "judge_completed", "后端已完成判题", { soundId: sound.id, recorded: true });
-  await writeStore(env, data);
-  return json({ ok: true, answer: recorded.answerRecord.answer });
+  const asrTicket = await createAsrSessionTicket(env, { sessionId:session.id, provider:asrProvider, questionIds:session.soundIds });
+  return json({ sessionId: session.id, questions: questions.map(publicSound), playthrough, asrProvider, asrProviderLabel: session.asrProviderLabel, asrTicket });
 }
 
 async function handleAnswerTextPost(request, env) {
@@ -1731,273 +1425,32 @@ async function handleMonitorGet(env, sessionId) {
 
 async function handleMonitorEvent(request, env) {
   const input = await readJsonBody(request);
-  const data = await readStore(env);
-  const session = getSessionById(data, input.sessionId);
-  if (!session) return json({ error: "监控记录不存在" }, 404);
-  const event = appendMonitor(
-    session,
-    "client",
-    String(input.type || "client_event").slice(0, 60),
-    String(input.message || "客户端事件").slice(0, 120),
-    input.details || {}
-  );
-  await writeStore(env, data);
+  if (!shouldPersistDiagnosticEvent(input.type)) return json({ ok: true, skipped: true });
+  const events = await readAnalyticsJournal(env);
+  const event = analyticsEvent({
+    ...input,
+    details:{ message:String(input.message || "客户端事件").slice(0, 120), ...(input.details || {}) }
+  }, request);
+  events.push(event);
+  await writeAnalyticsJournal(env, events);
   return json({ ok: true, event });
 }
 
 async function handleAnalyticsEvent(request, env) {
   const input = await readJsonBody(request);
-  const data = await readStore(env);
   if (isLightTestRequest(request, new URL(request.url), input, env)) return json({ ok: true, skipped: true, testMode: true });
-  const event = appendAnalyticsEvent(data, input, request);
-  await writeStore(env, data);
+  if (!shouldPersistDiagnosticEvent(input.type)) return json({ ok: true, skipped: true });
+  const events = await readAnalyticsJournal(env);
+  const event = analyticsEvent(input, request);
+  events.push(event);
+  await writeAnalyticsJournal(env, events);
   return json({ ok: true, id: event.id });
-}
-
-function wsOpen(socket) {
-  return socket && socket.readyState === 1;
-}
-
-function wsSendJson(socket, payload) {
-  if (wsOpen(socket)) socket.send(JSON.stringify(payload));
-}
-
-function closeSocket(socket, code = 1000, reason = "") {
-  try {
-    if (socket && socket.readyState < 2) socket.close(code, reason);
-  } catch {}
-}
-
-function textFromWsData(data) {
-  if (typeof data === "string") return data;
-  return new TextDecoder().decode(data);
-}
-
-async function handleAsrWebSocket(request, env) {
-  if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") return json({ error: "需要 WebSocket 连接" }, 426);
-  const pair = new WebSocketPair();
-  const client = pair[0];
-  const server = pair[1];
-  server.accept();
-  runAsrProxySocket(server, env).catch((error) => {
-    console.error("asr-websocket", error);
-    wsSendJson(server, { type: "ASR_ERROR", message: error?.message || "实时识别连接失败" });
-    closeSocket(server, 1011, "ASR proxy error");
-  });
-  return new Response(null, { status: 101, webSocket: client });
-}
-
-async function runAsrProxySocket(client, env) {
-  let upstream = null;
-  let provider = "";
-  let started = false;
-  let finishing = false;
-  let endedSent = false;
-  let finishTimer = 0;
-  let doubaoSequence = 1;
-  let doubaoPending = null;
-  let lastPartial = "";
-  let lastFinal = "";
-
-  const fail = (message) => {
-    wsSendJson(client, { type: "ASR_ERROR", provider, message });
-    closeSocket(upstream, 1011, "ASR upstream error");
-    closeSocket(client, 1011, "ASR proxy error");
-  };
-  const ready = () => {
-    if (started) return;
-    started = true;
-    wsSendJson(client, { type: "ASR_READY", provider, providerLabel: ASR_PROVIDER_LABELS[provider], sampleRate: 16000, frameBytes: 5120 });
-  };
-  const partial = (text) => {
-    const value = String(text || "").trim();
-    if (!value || value === lastPartial || value === lastFinal) return;
-    lastPartial = value;
-    wsSendJson(client, { type: "ASR_PARTIAL", provider, text: value });
-  };
-  const final = (text) => {
-    const value = String(text || "").trim();
-    if (!value || value === lastFinal) return;
-    lastFinal = value;
-    lastPartial = "";
-    wsSendJson(client, { type: "ASR_FINAL", provider, text: value });
-  };
-  const ended = () => {
-    if (endedSent) return;
-    endedSent = true;
-    clearTimeout(finishTimer);
-    wsSendJson(client, { type: "ASR_ENDED", provider });
-    closeSocket(client, 1000, "ASR finished");
-  };
-  const finishProvider = () => {
-    if (!wsOpen(upstream)) return;
-    if (provider === "baidu-realtime") upstream.send(JSON.stringify({ type: "FINISH" }));
-    else if (provider === "tencent-realtime-v2") upstream.send(JSON.stringify({ type: "end" }));
-    else if (provider === "doubao-streaming-v2") {
-      doubaoSequence += 1;
-      upstream.send(doubaoRequest(2, doubaoSequence, doubaoPending || Buffer.alloc(0), true, false));
-      doubaoPending = null;
-    }
-  };
-  const sendAudioFrame = async (data) => {
-    if (!started || finishing || !wsOpen(upstream)) return;
-    const frame = await arrayBufferFromWsData(data);
-    if (frame.byteLength > 6400) return fail("音频分片过大");
-    if (provider === "doubao-streaming-v2") {
-      if (doubaoPending) {
-        doubaoSequence += 1;
-        upstream.send(doubaoRequest(2, doubaoSequence, doubaoPending, false, false));
-      }
-      doubaoPending = Buffer.from(frame);
-      return;
-    }
-    upstream.send(frame);
-  };
-  const connectUpstream = async (payload) => {
-    const data = await readStore(env);
-    const session = getSessionById(data, String(payload.sessionId || ""));
-    const soundId = String(payload.soundId || payload.questionId || "");
-    const sound = session && data.sounds.find((item) => item.id === soundId);
-    if (!session || !sound || !rows(session.soundIds).includes(sound.id) || rows(session.answers).some((item) => item.soundId === sound.id)) {
-      fail("题目不存在或已经作答");
-      return;
-    }
-    provider = session.asrProvider || randomAsrProvider(env) || "baidu-realtime";
-    const config = realtimeProviderConfigs(env)[provider];
-    if (!config?.enabled) {
-      fail(`${ASR_PROVIDER_LABELS[provider] || "语音识别"}未配置`);
-      return;
-    }
-    if (provider === "baidu-realtime") {
-      const endpoint = new URL(config.endpoint);
-      endpoint.searchParams.set("sn", uuid());
-      upstream = new WebSocket(endpoint.toString());
-      upstream.addEventListener("open", () => {
-        const startData = {
-          appid: Number(config.appId),
-          appkey: config.appKey,
-          dev_pid: config.devPid,
-          cuid: config.cuid,
-          format: config.format,
-          sample: config.sampleRate
-        };
-        if (config.lmId) startData.lm_id = config.lmId;
-        upstream.send(JSON.stringify({ type: "START", data: startData }));
-        ready();
-      });
-      upstream.addEventListener("message", (event) => {
-        let result;
-        try { result = JSON.parse(textFromWsData(event.data)); } catch { return; }
-        if (Number(result.err_no || 0) || /ERROR|FAIL/i.test(String(result.type || ""))) {
-          return fail(result.err_msg || result.desc || `百度识别错误 ${result.err_no || result.error_code || result.type}`);
-        }
-        if (result.type === "MID_TEXT") partial(result.result);
-        if (result.type === "FIN_TEXT") {
-          final(result.result);
-        }
-      });
-    } else if (provider === "tencent-realtime-v2") {
-      const url = await tencentRealtimeUrl(env, config, soundAsrHotwords(data));
-      upstream = new WebSocket(url);
-      upstream.addEventListener("message", (event) => {
-        let result;
-        try { result = JSON.parse(textFromWsData(event.data)); } catch { return; }
-        if (Number(result.code) !== 0) return fail(result.message || `腾讯识别错误 ${result.code}`);
-        ready();
-        const list = result.sentences?.sentence_list || [];
-        const text = list.map((item) => item.sentence || "").join("").trim();
-        if (list.some((item) => Number(item.sentence_type) === 1)) final(text);
-        else partial(text);
-        if (Number(result.final) === 1) {
-          if (text) final(text);
-          ended();
-        }
-      });
-    } else if (provider === "doubao-streaming-v2") {
-      const hotwords = soundAsrHotwords(data);
-      upstream = await doubaoRealtimeSocket(config);
-      upstream.addEventListener("message", (event) => {
-        arrayBufferFromWsData(event.data).then((buffer) => {
-          let result;
-          try { result = parseDoubaoResponse(buffer); } catch (error) { return fail(`豆包响应解析失败：${error.message}`); }
-          if (result.code) return fail(result.body?.message || `豆包识别错误 ${result.code}`);
-          ready();
-          const body = result.body?.result || {};
-          const text = String(body.text || "").trim();
-          const utterances = Array.isArray(body.utterances) ? body.utterances : [];
-          if (result.last || utterances.some((item) => item.definite === true)) final(text);
-          else partial(text);
-          if (result.last) ended();
-        }).catch((error) => fail(`豆包响应读取失败：${error.message || error}`));
-      });
-      upstream.send(doubaoRequest(1, doubaoSequence, doubaoStartPayload(config, session.userId, hotwords), false, true));
-    } else {
-      fail("Cloudflare 轻量链路暂未启用该 ASR 服务");
-      return;
-    }
-    upstream.addEventListener("error", () => fail(`${ASR_PROVIDER_LABELS[provider]}连接失败`));
-    upstream.addEventListener("close", () => {
-      if (wsOpen(client)) ended();
-    });
-  };
-
-  client.addEventListener("message", (event) => {
-    const isBinary = typeof event.data !== "string";
-    if (isBinary) {
-      sendAudioFrame(event.data).catch(() => fail("音频分片发送失败"));
-      return;
-    }
-    let payload;
-    try { payload = JSON.parse(event.data); } catch { return fail("实时识别控制消息格式错误"); }
-    if (payload.type === "START") {
-      if (started || upstream) return fail("实时识别已经开始");
-      connectUpstream(payload).catch((error) => fail(error?.message || "实时识别启动失败"));
-      return;
-    }
-    if (payload.type === "FINISH" && started && !finishing) {
-      finishing = true;
-      finishProvider();
-      finishTimer = setTimeout(() => closeSocket(upstream, 1000, "ASR finish timeout"), provider === "doubao-streaming-v2" ? 6500 : 4500);
-      return;
-    }
-    if (payload.type === "CANCEL") {
-      if (provider === "baidu-realtime" && wsOpen(upstream)) upstream.send(JSON.stringify({ type: "CANCEL" }));
-      closeSocket(upstream, 1000, "ASR cancelled");
-      closeSocket(client, 1000, "ASR cancelled");
-    }
-  });
-  client.addEventListener("close", () => {
-    clearTimeout(finishTimer);
-    closeSocket(upstream, 1000, "client closed");
-  });
-  client.addEventListener("error", () => {
-    clearTimeout(finishTimer);
-    closeSocket(upstream, 1000, "client error");
-  });
 }
 
 async function handleAsrConfig(env) {
   const data = await readStore(env);
-  const configs = realtimeProviderConfigs(env);
   const hotwords = soundAsrHotwords(data);
-  const providers = Object.keys(ASR_PROVIDER_LABELS).map((provider) => ({
-    provider,
-    label: ASR_PROVIDER_LABELS[provider],
-    enabled: Boolean(configs[provider]?.enabled),
-    configured: Boolean(configs[provider]?.configured || configs[provider]?.enabled),
-    sampleRate: 16000,
-    frameBytes: 5120,
-    serverVad: provider !== "baidu-realtime",
-    reason: configs[provider]?.enabled ? "" : configs[provider]?.disabledReason || "Cloudflare Pages 生产环境缺少该 ASR 服务密钥"
-  }));
-  const enabled = providers.filter((item) => item.enabled);
-  return json({
-    realtime: { enabled: Boolean(enabled.length), providers, sampleRate: 16000, frameBytes: 5120 },
-    hotwords,
-    hotwordCount: hotwords.length,
-    status: enabled.length ? "ready" : "missing",
-    missing: providers.filter((item) => !item.enabled).map((item) => item.provider)
-  });
+  return json(sharedCloudflareAsr.providerStatus(env, hotwords, SOUND_ASR_RUNTIME));
 }
 
 export async function handleLightGameApi(request, env, pathname) {
@@ -2005,11 +1458,40 @@ export async function handleLightGameApi(request, env, pathname) {
   const url = new URL(request.url);
   try {
     if (request.method === "GET" && pathname === "/api/asr/config") return handleAsrConfig(env);
+    if (request.method === "GET" && pathname === "/api/voice/contract") return json(voiceGameContract.describeContract());
+    if (request.method === "POST" && pathname === "/api/asr/tencent-session") {
+      const input = await readJsonBody(request);
+      const data = await readStore(env);
+      let signedSoundIds = [];
+      if (!input.probe) {
+        const session = getSessionById(data, String(input.sessionId || ""));
+        const questionId = String(input.questionId || input.soundId || "");
+        const ticket = await verifyAsrSessionTicket(env, input.asrTicket, { sessionId:input.sessionId, provider:"tencent-realtime-v2", questionId });
+        const sound = data.sounds.find((item) => item.id === questionId);
+        if (!sound || (!session && !ticket) || (session && !rows(session.soundIds).includes(questionId))) return json({ error:"本轮验证已失效，请返回首页重新开始" }, 401);
+        if ((session?.asrProvider || ticket?.provider) !== "tencent-realtime-v2") return json({ error:"本轮未分配腾讯实时语音识别" }, 409);
+        signedSoundIds = rows(session?.soundIds).length ? rows(session.soundIds) : rows(ticket?.questionIds);
+      }
+      const config = tencentRealtimeConfig(env);
+      if (!config.enabled) return json({ error:"腾讯实时语音识别未配置" }, 503);
+      const cf = request.cf || {};
+      return json({
+        url:await tencentRealtimeUrl(env, config, soundAsrHotwords(data, signedSoundIds)),
+        expiresAt:new Date(Date.now() + 120000).toISOString(),
+        serviceRuntime:"cloudflare-pages-signer",
+        requestHost:url.host,
+        edgeColo:String(cf.colo || ""),
+        edgeCountry:String(cf.country || "")
+      });
+    }
+    if (request.method === "GET" && pathname === "/api/health") {
+      return json({ ok:true, runtime:"cloudflare-pages", version:"0.3.8-20261009" }, 200, { "Cache-Control":"public, max-age=30, stale-while-revalidate=120" });
+    }
     if (request.method === "GET" && pathname === "/api/asr/health") {
       const data = await readStore(env);
-      return json(await soundAsrHealth.check(env, soundAsrHotwords(data), url.searchParams.get("force") === "1"));
+      return json(await soundAsrHealth.check(env, soundAsrHotwords(data), url.searchParams.get("force") === "1"), 200, { "Cache-Control":"public, max-age=60, stale-while-revalidate=300" });
     }
-    if (pathname === "/ws/asr") return handleAsrWebSocket(request, env);
+    if (pathname === "/ws/asr") return json({ error:"音频代理已停用，请刷新页面使用腾讯直连" }, 410);
     if (request.method === "GET" && pathname === "/api/sounds") {
       const data = await readStore(env);
       return json(data.sounds.map(publicSound));
@@ -2017,13 +1499,13 @@ export async function handleLightGameApi(request, env, pathname) {
     if (request.method === "GET" && pathname === "/api/rankings") {
       const data = await readStore(env);
       const query = Object.fromEntries(url.searchParams.entries());
-      const limit = Math.max(1, Math.min(50, Number(url.searchParams.get("limit") || 10) || 10));
+      const limit = 10;
       const currentUser = resolveExistingRealUser(data, query);
       const ranking = scoreRankingRows(data);
       const currentRank = currentUser ? ranking.find((item) => item.id === currentUser.id) : null;
       return json({
         ranking: ranking.slice(0, limit),
-        user: currentRank || (currentUser ? userPublic(currentUser, data.sounds, sessionsFor(data)) : null)
+        user: currentRank
       });
     }
     if (request.method === "GET" && pathname === "/api/users/me") {
@@ -2047,7 +1529,6 @@ export async function handleLightGameApi(request, env, pathname) {
     if (request.method === "POST" && pathname === "/api/users") return handleUsersPost(request, env, url);
     if (request.method === "POST" && pathname === "/api/game/start") return handleGameStart(request, env, url);
     if (request.method === "POST" && pathname === "/api/game/answer-text") return handleAnswerTextPost(request, env);
-    if (request.method === "POST" && pathname === "/api/game/answer") return handleAnswerPost(request, env);
     if (request.method === "POST" && pathname === "/api/game/complete-shown") return handleCompleteShown(request, env);
     if (request.method === "POST" && pathname === "/api/game/monitor-event") return handleMonitorEvent(request, env);
     if (request.method === "POST" && pathname === "/api/analytics/event") return handleAnalyticsEvent(request, env);

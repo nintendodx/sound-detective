@@ -1,0 +1,26 @@
+{
+  "id": "20261008T103027Z",
+  "createdAt": "2026-10-08T10:30:42.298Z",
+  "protocolVersion": 1,
+  "projectName": "sound-detective",
+  "productionUrl": "https://stardream.studio/games/sound/",
+  "version": "0.3.7-20261008",
+  "gitCommit": "3a5dd24",
+  "synced": {
+    "secrets": false,
+    "data": false,
+    "assets": false
+  },
+  "asrModules": {
+    "voice-game-contract.js": "81d9dcd1e69d77b6791efb71b19217a2a91436e4ec489bcd26a5a5df3af7895b",
+    "asr-cloudflare-core.mjs": "a4b08bb215f58d811f87a01ae6c8ffe21269b1aef1d7188f89f2268742153ff7",
+    "asr-health-worker.mjs": "cc5de50d9b19cc0bd74516d0a7527e483891e49c14516d958b02c3a96286b907",
+    "asr-node.cjs": "4601b13e6fc7789db09872cdc21fc3c4fba91703f0462b14c86ee4e7bd1d7cf9",
+    "asr-session-ticket.mjs": "f115e7890b34dc54e28982044283af443abef3941472a9905630b475449636c5",
+    "voice-asr-client.js": "3b5c19ebb72ce22f441545725fb046219915f7e47371969bb0f5e91af3d78d94"
+  },
+  "asrStatus": "ready",
+  "availableAsrProviders": [
+    "tencent-realtime-v2"
+  ]
+}

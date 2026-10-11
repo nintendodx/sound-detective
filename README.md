@@ -1,68 +1,52 @@
-# DX100 声音游戏
+# 声音侦探
 
-一个本地可运行、云端可直接发布的声音识别游戏。数据保存在 `data/store.json`，上传音频保存在 `uploads/`。
+声音侦探是一个使用语音回答日常声音题目的 H5 游戏。当前候选版本为 `0.3.8-20261009`。
 
-## 启动
+## 本地运行
 
 ```bash
 npm start
 ```
 
-- 游戏：`http://localhost:3000`
-- 管理后台：`http://localhost:3000/admin.html`
+本地服务默认监听 `3000` 端口。题库、用户和历史成绩保存在 `data/store.json`；声音素材由统一游戏管理后台维护。
 
-首次启动会创建 5 道可直接演示的合成音效题；可在后台上传真实音频、编辑标签、启用或失效。
+## 语音架构
 
-## 服务端语音转文字配置
+- 生产环境只使用腾讯实时语音识别 2.0
+- 浏览器采集 16kHz、16-bit、单声道 PCM，并按 200ms 节奏直接发送给腾讯 WebSocket
+- 后端只生成短时签名地址，不接收或中转答题音频
+- 麦克风生命周期、重采样、VAD、实时字幕、重试和诊断事件来自三款游戏共用的共享模块
+- 判题统一使用共享答案契约，支持题目标签、别名、语义意图和保守近似匹配
+- 题目、判题结果和语音时序可以通过共享 Agent 契约复用
 
-iOS Safari 不支持浏览器自带的 Web Speech API，本项目会把手机录到的声音传回本机服务端，再由服务端调用语音转文字服务。API Key 只放在服务端，不会发到浏览器。
+共享源码位于游戏公共服务工程的 `shared/` 目录，通过 `npm run sync:asr` 同步到本项目。不要在本项目单独修改同步生成的共享文件。
 
-1. 复制 `.env.example` 为 `.env`。
-2. 将 `.env` 里的语音转文字 API Key 改成你自己的 key。
-3. 重启 `npm start` 服务。
-
-```bash
-cp .env.example .env
-```
-
-推荐给本地 demo 使用本地 whisper.cpp，不走任何公网 API。项目会优先检测本地模型；模型存在时，即使 `.env` 里还留着旧 API Key，也默认走本地识别。
+## 检查与构建
 
 ```bash
-STT_PROVIDER=local
-LOCAL_WHISPER_BIN=tools/whisper-local/ggml-org-whisper.cpp-0b9af32/main
-LOCAL_WHISPER_MODEL=tools/whisper-local/models/ggml-base-q5_1.bin
-LOCAL_WHISPER_LANGUAGE=zh
-LOCAL_WHISPER_THREADS=4
+npm run check
+npm run build:pages
+npm run release:validate
 ```
 
-备用方案：Groq Whisper，不走 OpenAI API，但需要 Groq Key：
+`release:validate` 只执行共享文件同步、检查和 Pages 构建，不部署、不上传数据，也不修改 Cloudflare 密钥。
+
+## 从 GitHub 恢复
+
+GitHub 仓库只保存源码、锁文件、配置模板、共享语音模块快照和发布记录，不保存用户数据、答题事件、凭据或本机绝对路径链接。
 
 ```bash
-STT_PROVIDER=groq
-GROQ_API_KEY=gsk-你的GroqKey
-GROQ_TRANSCRIBE_MODEL=whisper-large-v3-turbo
-STT_LANGUAGE=zh
+git clone https://github.com/nintendodx/sound-detective.git
+cd sound-detective
+npm ci
+npm run check
+npm run build:pages
 ```
 
-也可以继续使用 OpenAI：
+以上步骤可以在不连接生产服务的情况下恢复并验证必要构建输入。本地题库和用户数据位于 `data/store.json`，声音与结果图片位于 Cloudflare R2；需要恢复运行数据或素材时，按 [`docs/CLOUD_RELEASE.md`](docs/CLOUD_RELEASE.md) 的灾难恢复步骤显式拉取。不要把这些活数据重新提交到公开仓库。
 
-```bash
-STT_PROVIDER=openai
-OPENAI_API_KEY=sk-你的OpenAIKey
-OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
-STT_LANGUAGE=zh
-```
+## Cloudflare 发布
 
-## 互联网访问
+正式环境使用 Cloudflare Pages Direct Upload，静态页面、游戏 API、短时签名接口、KV 和 R2 由同一个 Pages 项目承载，不依赖 GitHub 在线构建或单独的游戏 Worker。统一管理后台由 `https://admin.stardream.studio/` 提供。
 
-路由器已做端口映射时，可将 3000 端口映射到这台电脑。更推荐使用 Cloudflare Tunnel：安装 `cloudflared` 后运行 `cloudflared tunnel --url http://localhost:3000`，它会输出一个可分享的 HTTPS 链接。生产使用前请配置固定域名、备份 `data/` 与 `uploads/`，并在反向代理处开启 HTTPS。
-
-## 云端发布
-
-正式环境只使用 Cloudflare Pages Direct Upload。Pages 直接承载静态资源、游戏 API、语音 WebSocket、KV 和 R2，不依赖单独的游戏 Worker，也不依赖 GitHub 在线构建。Admin 后台继续独立部署。发布、备份和恢复流程见 [`docs/CLOUD_RELEASE.md`](docs/CLOUD_RELEASE.md)。
-
-## 语音识别与判题
-
-支持浏览器 Web Speech API 时，答题页会录音并自动转写；不支持时用户可切换到文字输入。服务端的默认判题使用标签、同义词和文本相似度，便于零配置演示。`judgeAnswer` 是后续接入语音转写与大模型判题的唯一替换点；接入时应只传入题目标签和用户转写文本，不要把正确答案直接展示给模型。
-
-判题阶段使用本地轻量语义匹配，不再调用远程大模型：会过滤“这是/好像/声音”等描述词，折叠重复短语，匹配声音名称、标签和内置意图词库，通常在毫秒级完成。
+发布、备份与恢复流程见 [`docs/CLOUD_RELEASE.md`](docs/CLOUD_RELEASE.md)。生产发布必须在本地验收通过并获得明确授权后执行。

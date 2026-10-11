@@ -1,0 +1,27 @@
+{
+  "id": "20261004T112305Z",
+  "createdAt": "2026-10-04T11:23:26.147Z",
+  "protocolVersion": 1,
+  "projectName": "sound-detective",
+  "productionUrl": "https://stardream.studio/games/sound/",
+  "version": "0.2.050-20261004",
+  "gitCommit": "3a5dd24",
+  "synced": {
+    "secrets": false,
+    "data": false,
+    "assets": false
+  },
+  "asrModules": {
+    "asr-cloudflare-core.mjs": "702e20f2d2dd215d90eccb315962df9ab7029e2d7b2d2396e69bc4188b70b875",
+    "asr-health-worker.mjs": "941e37d5aefd44fd7a8c7cca7ba4d2fcf02dc871ab01a287c0de33885c766f11",
+    "asr-node.cjs": "fe6bb66ce7e14173a8b3ed9b4c5c49e37bc583deee99f5902cc2f1402e371887",
+    "asr-session-ticket.mjs": "5eac46dab0582dea8d6418172f6bc22003d4c8ec1b2c56f0979d73a44d55d6cb",
+    "voice-asr-client.js": "b63984fc7ab61ba23c01f942b1ab1511085ceb3fbb0d181968cb8552d644f035"
+  },
+  "asrStatus": "ready",
+  "availableAsrProviders": [
+    "tencent-realtime-v2",
+    "doubao-streaming-v2",
+    "baidu-realtime"
+  ]
+}

@@ -5,6 +5,9 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const RELEASE_CONFIG = JSON.parse(fs.readFileSync(path.join(ROOT, "cloudflare.release.json"), "utf8"));
+const ENV_FILE = process.env.VOICE_GAME_ENV_FILE || RELEASE_CONFIG.envFile || "";
+const SHARED_ENV_FILE = ENV_FILE ? path.resolve(ENV_FILE) : "";
 const STORE_FILE = path.join(ROOT, "data", "store.json");
 const UPLOADS_DIR = path.join(ROOT, "uploads");
 const IMAGES_DIR = path.join(ROOT, "图片文件");
@@ -26,13 +29,14 @@ function loadEnvFile(file) {
   }
 }
 
-loadEnvFile(path.join(ROOT, ".env.cloud"));
+if (SHARED_ENV_FILE) loadEnvFile(SHARED_ENV_FILE);
 process.env.WRANGLER_LOG_PATH ||= path.join(ROOT, ".wrangler", "logs");
 
 function usage() {
   console.log([
     "Usage:",
-    "  node scripts/sync-cloudflare-data.mjs push [--data] [--assets] [--images]",
+    "  node scripts/sync-cloudflare-data.mjs push [--assets] [--images]",
+    "  node scripts/sync-cloudflare-data.mjs push --data --confirm-production-data-overwrite",
     "  node scripts/sync-cloudflare-data.mjs pull [--data] [--assets] [--images]",
     "  node scripts/sync-cloudflare-data.mjs list",
     "",
@@ -47,9 +51,10 @@ function parseArgs() {
   const noneSelected = !flags.has("--data") && !flags.has("--assets") && !flags.has("--images");
   return {
     command,
-    data: noneSelected || flags.has("--data"),
-    assets: noneSelected || flags.has("--assets"),
-    images: noneSelected || flags.has("--images")
+    data: command === "pull" ? noneSelected || flags.has("--data") : flags.has("--data"),
+    assets: command === "pull" ? noneSelected || flags.has("--assets") : flags.has("--assets"),
+    images: command === "pull" ? noneSelected || flags.has("--images") : flags.has("--images"),
+    confirmedDataOverwrite: flags.has("--confirm-production-data-overwrite")
   };
 }
 
@@ -158,6 +163,12 @@ function main() {
     if (options.assets) pullFiles("uploads", UPLOADS_DIR);
     if (options.images) pullFiles("images", IMAGES_DIR);
     return;
+  }
+  if (!options.data && !options.assets && !options.images) {
+    throw new Error("push 必须明确选择 --assets、--images 或受保护的 --data");
+  }
+  if (options.data && !options.confirmedDataOverwrite) {
+    throw new Error("覆盖生产数据必须同时传入 --confirm-production-data-overwrite");
   }
   if (options.data) pushJson();
   if (options.assets) pushFiles(UPLOADS_DIR, "uploads");

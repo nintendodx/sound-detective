@@ -1,18 +1,22 @@
 {
   "name": "dx100-sound-game",
-  "version": "0.2.012",
+  "version": "0.3.8-20261009",
   "private": true,
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "check": "node --check server.js && node --check cloudflare/worker.mjs && node --check cloudflare/light-game.mjs && node --check scripts/build-cloudflare.js && node --check scripts/build-cloudflare-pages.js && node --check scripts/release-cloudflare-pages.js && node --check scripts/sync-cloudflare-data.mjs && node --check scripts/sync-cloudflare-secrets.mjs",
+    "sync:asr": "node scripts/sync-shared-asr.cjs",
+    "check": "node --check server.js && node --check cloudflare/worker.mjs && node --check cloudflare/light-game.mjs && node --check public/shared/voice-asr-client.js && node --check shared/voice-game-contract.js && node --check shared/asr-cloudflare-core.mjs && node --check shared/asr-health-worker.mjs && node --check shared/asr-session-ticket.mjs && node --check scripts/build-cloudflare.js && node --check scripts/build-cloudflare-pages.js && node --check scripts/sync-shared-asr.cjs && node --check scripts/release-cloudflare-pages.cjs && node --check scripts/sync-cloudflare-data.mjs && node --check scripts/sync-cloudflare-secrets.mjs && node scripts/test-cloud-only.cjs && node scripts/test-asr-session-ticket.mjs",
     "build:cloudflare": "node scripts/build-cloudflare.js",
     "build:cloudflare:pages": "node scripts/build-cloudflare-pages.js",
-    "cloudflare:push": "node scripts/sync-cloudflare-data.mjs push",
+    "build:pages": "node scripts/build-cloudflare-pages.js",
+    "cloudflare:push:assets": "node scripts/sync-cloudflare-data.mjs push --assets --images",
+    "cloudflare:restore:data": "node scripts/sync-cloudflare-data.mjs push --data --confirm-production-data-overwrite",
     "cloudflare:pull": "node scripts/sync-cloudflare-data.mjs pull",
     "cloudflare:list": "node scripts/sync-cloudflare-data.mjs list",
     "cloudflare:secrets": "node scripts/sync-cloudflare-secrets.mjs",
-    "release": "node scripts/release-cloudflare-pages.js"
+    "release": "node scripts/release-cloudflare-pages.cjs",
+    "release:validate": "node scripts/release-cloudflare-pages.cjs --validate-only"
   },
   "dependencies": {
     "ws": "^8.21.0"
@@ -21,6 +25,6 @@
     "node": ">=20"
   },
   "devDependencies": {
-    "wrangler": "^4.123.0"
+    "wrangler": "4.123.0"
   }
 }

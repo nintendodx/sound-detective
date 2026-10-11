@@ -1,0 +1,19 @@
+/* Hallmark · tokens · Sound Detective / Marquee Stage */
+:root {
+  --brand-title-ink: #171719;
+  --color-paper: oklch(98% 0.02 76);
+  --color-surface: oklch(100% 0 0);
+  --color-ink: oklch(24% 0.045 264);
+  --color-muted: oklch(57% 0.04 264);
+  --color-accent: oklch(70% 0.19 39);
+  --color-focus: oklch(55% 0.20 258);
+  --font-display: "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --space-xs: 4px; --space-sm: 8px; --space-md: 16px; --space-lg: 24px; --space-xl: 32px;
+  --text-sm: 12px; --text-md: 16px; --text-display: 40px;
+  --radius-sm: 6px; --radius-md: 8px; --rule-thin: 1px;
+  --dur-short: 120ms; --dur-medium: 240ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 1, 0.35, 1);
+}

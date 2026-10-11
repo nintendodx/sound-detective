@@ -9,18 +9,6 @@ const SOURCE_EXTENSIONS = new Set(['.js', '.mjs', '.html', '.css', '.toml', '.js
 const METRIC_EXCLUDED_DIRS = new Set(['.git', '.netlify', '.wrangler', '.certs', 'node_modules', 'dist', 'dist-cloudflare', 'data', 'uploads', '图片文件', '声音文件']);
 const METRIC_EXCLUDED_PREFIXES = ['tools/whisper-local', 'tools/sensevoice'];
 const METRIC_EXCLUDED_FILES = new Set(['package-lock.json']);
-const REMOVED_ADMIN_ASSETS = new Set([
-  'admin.html',
-  'admin.js',
-  'admin-users.html',
-  'admin-users.js',
-  'admin-tags.html',
-  'admin-tags.js',
-  'admin-analytics.html',
-  'admin-analytics.js',
-  'admin.css'
-]);
-
 function metricRelative(file) {
   return path.relative(ROOT, file).split(path.sep).join('/');
 }
@@ -114,7 +102,7 @@ function appVersion() {
 function updateHtmlVersion(file, version) {
   const target = path.join(DIST_DIR, file);
   let html = fs.readFileSync(target, 'utf8');
-  html = html.replace(/(\/public\/(?:style\.css|app\.js|team\.js|brand-wordmark\.svg|how-to-play\.svg|admin(?:[-.]|$)[^"']*)\?v=)[^"']+/g, `$1${version}`);
+  html = html.replace(/(\/public\/(?:style\.css|app\.js|team\.js|changelog-classification\.js|shared\/voice-asr-client\.js|brand-wordmark\.svg|how-to-play(?:-match-cartoon)?\.(?:svg|png))\?v=)[^"']+/g, `$1${version}`);
   html = html.replace(/(<span id="appVersion">)[^<]+(<\/span>)/, `$1${version}$2`);
   html = html.replace(/(<b id="changelogTitle">)[^<]+(<\/b>)/, `$1${version}$2`);
   fs.writeFileSync(target, html);
@@ -124,7 +112,6 @@ function copyDir(from, to) {
   fs.mkdirSync(to, { recursive: true });
   for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
     if (entry.name === 'dx100-root-ca.crt') continue;
-    if (from === PUBLIC_DIR && REMOVED_ADMIN_ASSETS.has(entry.name)) continue;
     const source = path.join(from, entry.name);
     const target = path.join(to, entry.name);
     if (entry.isDirectory()) copyDir(source, target);
