@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "source_root": "/Users/daixin/Documents/Development/projects/games/sound-detective/app",
+  "owner_thread": "019fef6b-9cda-7b83-8a62-b2d737cbfb2b",
+  "primary_remote": "https://github.com/nintendodx/sound-detective.git",
+  "allowed_task_branches": [
+    "codex/git-checkpoint-20261013"
+  ],
+  "enabled": true,
+  "deployment_audit": {
+    "status": "verified_no_deploy_for_allowed_branch",
+    "checked_at": "2026-10-13T13:27:00+08:00",
+    "evidence": [
+      "Local core.hooksPath is unset and .git/hooks contains sample files only.",
+      "GitHub default branch contains no .github directory; repository Actions history has 0 workflow runs and repository Webhooks page has no configured webhook.",
+      "Cloudflare Workers and Pages dashboard lists sound-detective as a Pages project with no Git connection; account Workers build time is 0 minutes.",
+      "The Cloudflare release path is explicit Wrangler Direct Upload through scripts/release-cloudflare-pages.cjs; no push, pull request, branch, or tag trigger is declared in the repository.",
+      "The exact predecessor task branch codex/source-baseline-20261011 was created on 2026-10-11. Netlify received the repository event but produced 0 check runs, 0 commit statuses, and no completed deployment for that branch.",
+      "No Zeabur, GitLab CI, 172-host deployment, or GitHub Pages configuration is present in the audited repository."
+    ],
+    "configuration_fingerprints": {
+      "baseline_tree": "8665fdca98a76a75894af020b92e8d9c949068b1",
+      "wrangler.jsonc": "sha256:c11c66d17a50fbb5545c927e2df88928d7391ceb81bc865fa5b78356ef05e324",
+      "cloudflare.release.json": "sha256:0b69a6b830ff953575fc59cc8990f74860d4dbcd7981d99c1b469683e7b29b88",
+      "scripts/release-cloudflare-pages.cjs": "sha256:866f46c77138b63b0d54d846b41eac76193570a63cc7e0cc83663a49df3f7b22",
+      "package.json": "sha256:4ad6e45334f0eb832735518315d0ec1f3145c77c6052f53995f4153d58a92cc4",
+      ".gitignore": "sha256:2a292a269cc06131a60d5be09847ea91a830b2f6208279e0ed2cf43f92c1cd7d"
+    },
+    "push_deploy": false,
+    "pr_preview_deploy": "not_permitted_by_checkpoint_policy",
+    "external_platforms": [
+      {
+        "name": "cloudflare-pages",
+        "binding": "direct-upload-no-git-connection",
+        "push_deploy": false
+      },
+      {
+        "name": "netlify",
+        "binding": "github-app-installed-but-no-run-for-exact-predecessor-task-branch",
+        "push_deploy": false,
+        "constraint": "exact branch only; do not open a pull request"
+      },
+      {
+        "name": "zeabur-or-172",
+        "binding": "none-found-in-repository-or-deployment-inventory",
+        "push_deploy": false
+      }
+    ]
+  },
+  "checkpoint_policy": {
+    "stage_explicit_owned_paths_only": true,
+    "secret_and_live_data_exclusion_required": true,
+    "record_failed_or_unverified_checks": true,
+    "verify_remote_sha_after_push": true,
+    "auto_merge": false,
+    "auto_deploy": false,
+    "push_main": false,
+    "force_push": false,
+    "auto_open_pr": false
+  },
+  "last_checkpoint": null,
+  "note": "This is a Git checkpoint upload policy, not a gate task manifest or deployment authorization."
+}
