@@ -6,16 +6,16 @@
   "allowed_task_branches": [
     "codex/git-checkpoint-20261013"
   ],
-  "enabled": true,
+  "enabled": false,
   "deployment_audit": {
-    "status": "verified_no_deploy_for_allowed_branch",
+    "status": "pending_netlify_binding",
     "checked_at": "2026-10-13T13:27:00+08:00",
     "evidence": [
       "Local core.hooksPath is unset and .git/hooks contains sample files only.",
       "GitHub default branch contains no .github directory; repository Actions history has 0 workflow runs and repository Webhooks page has no configured webhook.",
       "Cloudflare Workers and Pages dashboard lists sound-detective as a Pages project with no Git connection; account Workers build time is 0 minutes.",
       "The Cloudflare release path is explicit Wrangler Direct Upload through scripts/release-cloudflare-pages.cjs; no push, pull request, branch, or tag trigger is declared in the repository.",
-      "The exact predecessor task branch codex/source-baseline-20261011 was created on 2026-10-11. Netlify received the repository event but produced 0 check runs, 0 commit statuses, and no completed deployment for that branch.",
+      "Netlify GitHub App receives repository events and created queued suites for both observed task branches. Zero short-window check runs, statuses, and deployments do not prove that delayed branch or preview deploys are disabled.",
       "No Zeabur, GitLab CI, 172-host deployment, or GitHub Pages configuration is present in the audited repository."
     ],
     "configuration_fingerprints": {
@@ -26,7 +26,7 @@
       "package.json": "sha256:4ad6e45334f0eb832735518315d0ec1f3145c77c6052f53995f4153d58a92cc4",
       ".gitignore": "sha256:2a292a269cc06131a60d5be09847ea91a830b2f6208279e0ed2cf43f92c1cd7d"
     },
-    "push_deploy": false,
+    "push_deploy": null,
     "pr_preview_deploy": "not_permitted_by_checkpoint_policy",
     "external_platforms": [
       {
@@ -36,9 +36,9 @@
       },
       {
         "name": "netlify",
-        "binding": "github-app-installed-but-no-run-for-exact-predecessor-task-branch",
-        "push_deploy": false,
-        "constraint": "exact branch only; do not open a pull request"
+        "binding": "github-app-installed-site-branch-rules-unread",
+        "push_deploy": null,
+        "constraint": "automatic upload paused until authoritative site Git binding and branch deploy settings are read"
       },
       {
         "name": "zeabur-or-172",
@@ -59,5 +59,5 @@
     "auto_open_pr": false
   },
   "last_checkpoint": null,
-  "note": "This is a Git checkpoint upload policy, not a gate task manifest or deployment authorization."
+  "note": "Automatic upload is paused because Netlify site-level Git and branch deploy settings remain unread. The successful first upload is retained as evidence, not treated as ongoing eligibility."
 }
